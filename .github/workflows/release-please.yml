@@ -90,11 +90,11 @@ jobs:
 
       - name: Build Android APK
         run: |
-          flutter build apk --release --obfuscate --split-debug-info=build/android/symbols
+          flutter build apk --release --obfuscate --split-debug-info=build/android/symbols --android-skip-build-dependency-validation
 
       - name: Build Android App Bundle (AAB)
         run: |
-          flutter build appbundle --release --obfuscate --split-debug-info=build/android/symbols
+          flutter build appbundle --release --obfuscate --split-debug-info=build/android/symbols --android-skip-build-dependency-validation
 
       - name: Upload Android Artifacts to GitHub Release
         env:

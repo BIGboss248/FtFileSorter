@@ -86,8 +86,8 @@ flowchart LR
    - Format `capabilities` as a comma-separated string (e.g., `capabilities: internetClient`), never a YAML list.
    - Set `install_certificate: false` and pass `--install-certificate false` in CI.
 4. Verify Android Gradle & Kotlin compatibility for CI (`flutter analyze --suggestions`):
-   - Set Gradle wrapper `distributionUrl` to at least `gradle-8.14-all.zip` in `android/gradle/wrapper/gradle-wrapper.properties`.
-   - Set `org.jetbrains.kotlin.android` to `2.2.0`+ in `android/settings.gradle.kts` and `android.newDsl=false` in `android/gradle.properties`.
+   - Set Gradle wrapper `distributionUrl` to at least `gradle-9.1.0-all.zip` in `android/gradle/wrapper/gradle-wrapper.properties`.
+   - Set `com.android.application` (AGP) to `8.11.1`+ and `org.jetbrains.kotlin.android` to `2.2.0`+ in `android/settings.gradle.kts`, and `android.newDsl=false` in `android/gradle.properties`.
 5. Configure `concurrency: cancel-in-progress: false` on release jobs to protect ongoing builds on `main`, and deploy both Windows (`.msix` + `.zip`) and Android (`.apk` + `.aab`) artifacts to the GitHub Release page via `gh release upload --clobber`.
 6. Consult [release-please-and-cicd.md](./references/release-please-and-cicd.md) for Windows MSIX, Android APK/AAB, and archive bundling specs.
 

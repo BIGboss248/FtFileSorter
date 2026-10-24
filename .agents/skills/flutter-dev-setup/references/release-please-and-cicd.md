@@ -50,16 +50,16 @@ msix_config:
 When building on GitHub Actions (`subosito/flutter-action@v2` with `channel: stable`), the runner pulls the latest stable Flutter SDK, which enforces strict minimum Gradle and Kotlin Gradle Plugin (KGP) versions:
 
 1. **Gradle Wrapper (`android/gradle/wrapper/gradle-wrapper.properties`)**:
-   Ensure `distributionUrl` is at least **Gradle 8.14**:
+   Ensure `distributionUrl` is at least **Gradle 9.1.0**:
    ```properties
-   distributionUrl=https\://services.gradle.org/distributions/gradle-8.14-all.zip
+   distributionUrl=https\://services.gradle.org/distributions/gradle-9.1.0-all.zip
    ```
 2. **Kotlin & AGP Versions (`android/settings.gradle.kts`)**:
-   Gradle 8.14 requires **Kotlin 2.2.0+** (`org.jetbrains.kotlin.android`). Verify compatibility locally via `flutter analyze --suggestions`:
+   Latest Flutter stable requires **AGP 8.11.1+** (`com.android.application`) and **Kotlin 2.2.0+** (`org.jetbrains.kotlin.android`):
    ```kotlin
    plugins {
        id("dev.flutter.flutter-plugin-loader") version "1.0.0"
-       id("com.android.application") version "8.9.1" apply false
+       id("com.android.application") version "8.11.1" apply false
        id("org.jetbrains.kotlin.android") version "2.2.0" apply false
    }
    ```
