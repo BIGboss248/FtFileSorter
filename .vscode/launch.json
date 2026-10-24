@@ -1,0 +1,28 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Flutter: Debug (Windows)",
+      "type": "dart",
+      "request": "launch",
+      "program": "lib/main_dev.dart",
+      "args": ["-d", "windows", "--dart-define-from-file=config/dev.json"]
+    },
+    {
+      "name": "Flutter: Profile (Windows)",
+      "type": "dart",
+      "request": "launch",
+      "program": "lib/main_dev.dart",
+      "flutterMode": "profile",
+      "args": ["-d", "windows", "--dart-define-from-file=config/dev.json"]
+    },
+    {
+      "name": "Flutter: Release (Windows)",
+      "type": "dart",
+      "request": "launch",
+      "program": "lib/main_prod.dart",
+      "flutterMode": "release",
+      "args": ["-d", "windows", "--dart-define-from-file=config/prod.json"]
+    }
+  ]
+}

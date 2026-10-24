@@ -1,0 +1,10 @@
+{
+  "packages": {
+    ".": {
+      "release-type": "dart",
+      "package-name": "ft_file_sorter",
+      "bump-minor-pre-major": true,
+      "bump-patch-for-minor-pre-major": true
+    }
+  }
+}

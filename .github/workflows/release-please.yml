@@ -1,0 +1,55 @@
+name: Release Please & Windows Build
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      - name: Check out repository
+        if: ${{ steps.release.outputs.releases_created == 'true' }}
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        if: ${{ steps.release.outputs.releases_created == 'true' }}
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        if: ${{ steps.release.outputs.releases_created == 'true' }}
+        run: flutter pub get
+
+      - name: Build Windows Executable
+        if: ${{ steps.release.outputs.releases_created == 'true' }}
+        run: |
+          flutter build windows --release --obfuscate --split-debug-info=build/windows/symbols
+
+      - name: Compress Release Artifacts
+        if: ${{ steps.release.outputs.releases_created == 'true' }}
+        run: |
+          Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath ft_file_sorter-windows.zip
+
+      - name: Upload Release Artifact
+        if: ${{ steps.release.outputs.releases_created == 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload ${{ steps.release.outputs.tag_name }} ft_file_sorter-windows.zip

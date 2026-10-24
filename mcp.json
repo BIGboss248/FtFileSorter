@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "dart-flutter-mcp": {
+      "command": "dart",
+      "args": ["run", "dart_mcp_server"]
+    },
+    "developer-knowledge": {
+      "url": "https://developers.google.com/knowledge/mcp"
+    }
+  }
+}

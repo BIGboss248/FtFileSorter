@@ -1,0 +1,6 @@
+{
+  "APP_ENV": "production",
+  "API_BASE_URL": "https://api.ftfilesorter.com/api/v1",
+  "ENABLE_LOGGING": false,
+  "SHOW_DEBUG_BANNER": false
+}
