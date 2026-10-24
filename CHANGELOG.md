@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.6](https://github.com/BIGboss248/FtFileSorter/compare/ft_file_sorter-v0.1.5...ft_file_sorter-v0.1.6) (2026-10-24)
+
+
+### Bug Fixes
+
+* **release:** correct relative SetupIconFile path in inno setup script ([1f47c34](https://github.com/BIGboss248/FtFileSorter/commit/1f47c3427391ce21abeeeb5870b828b00d36a89e))
+
 ## [0.1.5](https://github.com/BIGboss248/FtFileSorter/compare/ft_file_sorter-v0.1.4...ft_file_sorter-v0.1.5) (2026-10-24)
 
 
