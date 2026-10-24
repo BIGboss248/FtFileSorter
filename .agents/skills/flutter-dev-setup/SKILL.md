@@ -77,13 +77,19 @@ flowchart LR
 3. Set up tracked `.githooks/commit-msg` pointing to `dart run commitlint_cli --edit "$1"` via `git config core.hooksPath .githooks`.
 4. Consult [git-hooks-and-lints.md](./references/git-hooks-and-lints.md) for full configuration details.
 
-### Stage 6: CI/CD & Automated Semantic Releases
+### Stage 6: CI/CD & Automated Semantic Releases (Windows & Android)
 1. Deploy [.github/workflows/release-please.yml](./resources/templates/release-please.yml.template).
 2. Configure Release Please manifest files:
    - `release-please-config.json` configured for Dart/Flutter packages.
    - `.release-please-manifest.json` tracking current release versions.
-3. Configure `concurrency: cancel-in-progress: false` on release jobs to protect ongoing builds on `main`.
-4. Consult [release-please-and-cicd.md](./references/release-please-and-cicd.md) for Windows MSIX and archive bundling specs.
+3. Configure Windows MSIX packaging (`msix` in `dev_dependencies` and `msix_config` in `pubspec.yaml`):
+   - Format `capabilities` as a comma-separated string (e.g., `capabilities: internetClient`), never a YAML list.
+   - Set `install_certificate: false` and pass `--install-certificate false` in CI.
+4. Verify Android Gradle & Kotlin compatibility for CI (`flutter analyze --suggestions`):
+   - Set Gradle wrapper `distributionUrl` to at least `gradle-8.14-all.zip` in `android/gradle/wrapper/gradle-wrapper.properties`.
+   - Set `org.jetbrains.kotlin.android` to `2.2.0`+ in `android/settings.gradle.kts` and `android.newDsl=false` in `android/gradle.properties`.
+5. Configure `concurrency: cancel-in-progress: false` on release jobs to protect ongoing builds on `main`, and deploy both Windows (`.msix` + `.zip`) and Android (`.apk` + `.aab`) artifacts to the GitHub Release page via `gh release upload --clobber`.
+6. Consult [release-please-and-cicd.md](./references/release-please-and-cicd.md) for Windows MSIX, Android APK/AAB, and archive bundling specs.
 
 ---
 
@@ -92,6 +98,8 @@ flowchart LR
 - **Desktop Embedding**: Always ensure Windows desktop is enabled (`flutter config --enable-windows-desktop`) before running desktop launch configurations.
 - **Node.js Independence**: Use `lefthook` for Git hooks instead of Node/Husky to keep pure Dart/Flutter environments dependency-free.
 - **Standalone Distribution**: Windows desktop builds require all accompanying DLLs and the `data/` folder alongside `<app>.exe`. Never distribute `<app>.exe` in isolation.
+- **MSIX `capabilities` Type Error**: In `pubspec.yaml` under `msix_config`, `capabilities` must be a comma-separated string (`capabilities: internetClient`), NOT a YAML list (`- internetClient`), otherwise `msix:create` crashes with `type 'YamlList' is not a subtype of type 'String?'`.
+- **Android CI Gradle/Kotlin Version Mismatch**: `subosito/flutter-action@v2` (`channel: stable`) installs the latest Flutter stable release on CI runners, which requires Gradle >= 8.14 and Kotlin >= 2.2.0. Always run `flutter analyze --suggestions` to validate Gradle/AGP/KGP compatibility and set `android.newDsl=false` in `android/gradle.properties`.
 - **Release Please PR Permissions**: By default, GitHub blocks `GITHUB_TOKEN` from opening PRs. Enable **Allow GitHub Actions to create and approve pull requests** under repository **Settings > Actions > General > Workflow permissions**, otherwise Release Please fails to create release PRs.
 - **MCP Disabling Behavior**: Antigravity ignores `"disabled": true` inside `mcpServers`. Move disabled servers outside `mcpServers` (e.g., to `_disabledMcpServers`).
 

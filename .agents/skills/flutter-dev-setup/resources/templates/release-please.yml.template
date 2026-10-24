@@ -1,0 +1,106 @@
+name: Release Please, Windows & Android Build
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      releases_created: ${{ steps.release.outputs.releases_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  build-windows:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.releases_created == 'true' }}
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build Windows Executable
+        run: |
+          flutter build windows --release --obfuscate --split-debug-info=build/windows/symbols
+
+      - name: Build Windows MSIX Package
+        run: |
+          dart run msix:create --version ${{ needs.release-please.outputs.version }}.0 --build-windows false --install-certificate false
+
+      - name: Compress Release Artifacts (.zip)
+        run: |
+          Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath FtFileSorter-windows.zip
+
+      - name: Upload Windows Artifacts to GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload ${{ needs.release-please.outputs.tag_name }} build\windows\x64\runner\Release\ft_file_sorter.msix#FtFileSorter-windows.msix FtFileSorter-windows.zip --clobber
+
+  build-android:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.releases_created == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build Android APK
+        run: |
+          flutter build apk --release --obfuscate --split-debug-info=build/android/symbols
+
+      - name: Build Android App Bundle (AAB)
+        run: |
+          flutter build appbundle --release --obfuscate --split-debug-info=build/android/symbols
+
+      - name: Upload Android Artifacts to GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload ${{ needs.release-please.outputs.tag_name }} \
+            build/app/outputs/flutter-apk/app-release.apk#FtFileSorter-android.apk \
+            build/app/outputs/bundle/release/app-release.aab#FtFileSorter-android.aab \
+            --clobber
