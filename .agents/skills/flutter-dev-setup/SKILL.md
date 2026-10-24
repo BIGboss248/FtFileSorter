@@ -92,6 +92,7 @@ flowchart LR
 - **Desktop Embedding**: Always ensure Windows desktop is enabled (`flutter config --enable-windows-desktop`) before running desktop launch configurations.
 - **Node.js Independence**: Use `lefthook` for Git hooks instead of Node/Husky to keep pure Dart/Flutter environments dependency-free.
 - **Standalone Distribution**: Windows desktop builds require all accompanying DLLs and the `data/` folder alongside `<app>.exe`. Never distribute `<app>.exe` in isolation.
+- **Release Please PR Permissions**: By default, GitHub blocks `GITHUB_TOKEN` from opening PRs. Enable **Allow GitHub Actions to create and approve pull requests** under repository **Settings > Actions > General > Workflow permissions**, otherwise Release Please fails to create release PRs.
 - **MCP Disabling Behavior**: Antigravity ignores `"disabled": true` inside `mcpServers`. Move disabled servers outside `mcpServers` (e.g., to `_disabledMcpServers`).
 
 ---
