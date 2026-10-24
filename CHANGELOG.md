@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.4](https://github.com/BIGboss248/FtFileSorter/compare/ft_file_sorter-v0.1.3...ft_file_sorter-v0.1.4) (2026-10-24)
+
+
+### Bug Fixes
+
+* **android:** upgrade agp to 8.11.1 and gradle to 9.1.0 for flutter 3.47 ([dfd3528](https://github.com/BIGboss248/FtFileSorter/commit/dfd3528769c09b72deae771c3a724c561ac81baa))
+
 ## [0.1.3](https://github.com/BIGboss248/FtFileSorter/compare/ft_file_sorter-v0.1.2...ft_file_sorter-v0.1.3) (2026-10-24)
 
 
