@@ -45,6 +45,17 @@ msix_config:
 > 2. **Disable Certificate Prompt in CI (`install_certificate: false`)**: When signing with the default test certificate on headless CI runners, `msix:create` prompts interactively via stdin (`Do you want to install the certificate... (y/N)`). Always set `install_certificate: false` in `pubspec.yaml` and pass `--install-certificate false` in CI.
 > 3. **Output Filename Matches `pubspec.yaml` `name`**: Unless `output_name` is explicitly set in `msix_config`, the generated installer is named `<pubspec_name>.msix` (e.g., `build\windows\x64\runner\Release\ft_file_sorter.msix`). Use `gh release upload <tag> path\to\<pubspec_name>.msix#<DisplayName>-windows.msix` to rename it cleanly on the GitHub Release page.
 
+## Windows Inno Setup `.exe` Installer (`windows/installer/setup.iss`)
+
+Deploy [`windows/installer/setup.iss`](../resources/templates/setup.iss.template) to compile a standard Windows Setup `.exe` installer alongside the MSIX package and portable `.zip`:
+- Packages `<binary>.exe`, `*.dll`, and the `data\*` directory from `build\windows\x64\runner\Release\`.
+- Outputs `build\windows\<AppName>-windows-setup.exe`.
+- Compiled in GitHub Actions via `C:\Program Files (x86)\Inno Setup 6\ISCC.exe` (pre-installed on `windows-latest`, with Chocolatey fallback):
+  ```powershell
+  & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DMyAppVersion=${{ needs.release-please.outputs.version }}" windows\installer\setup.iss
+  ```
+- **Execution Order**: Run `Compress-Archive` (`.zip`) and Inno Setup (`ISCC.exe`) **before** `dart run msix:create` so the `.zip` archive and `.exe` installer do not bundle the generated `.msix` file inside `build\windows\x64\runner\Release\`.
+
 ## Android Gradle & AGP Compatibility (`android/`)
 
 When building on GitHub Actions (`subosito/flutter-action@v2` with `channel: stable`), the runner pulls the latest stable Flutter SDK, which enforces strict minimum Gradle and Kotlin Gradle Plugin (KGP) versions:

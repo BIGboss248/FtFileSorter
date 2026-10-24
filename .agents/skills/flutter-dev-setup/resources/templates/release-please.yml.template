@@ -49,19 +49,31 @@ jobs:
         run: |
           flutter build windows --release --obfuscate --split-debug-info=build/windows/symbols
 
-      - name: Build Windows MSIX Package
-        run: |
-          dart run msix:create --version ${{ needs.release-please.outputs.version }}.0 --build-windows false --install-certificate false
-
       - name: Compress Release Artifacts (.zip)
         run: |
           Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath FtFileSorter-windows.zip
+
+      - name: Build Windows Inno Setup Installer (.exe)
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup -y --no-progress
+          }
+          & $iscc "/DMyAppVersion=${{ needs.release-please.outputs.version }}" windows\installer\setup.iss
+
+      - name: Build Windows MSIX Package
+        run: |
+          dart run msix:create --version ${{ needs.release-please.outputs.version }}.0 --build-windows false --install-certificate false
 
       - name: Upload Windows Artifacts to GitHub Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload ${{ needs.release-please.outputs.tag_name }} build\windows\x64\runner\Release\ft_file_sorter.msix#FtFileSorter-windows.msix FtFileSorter-windows.zip --clobber
+          gh release upload ${{ needs.release-please.outputs.tag_name }} `
+            build\windows\FtFileSorter-windows-setup.exe `
+            build\windows\x64\runner\Release\ft_file_sorter.msix#FtFileSorter-windows.msix `
+            FtFileSorter-windows.zip `
+            --clobber
 
   build-android:
     needs: release-please
