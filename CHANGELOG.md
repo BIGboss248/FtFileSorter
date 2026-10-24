@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/BIGboss248/FtFileSorter/compare/ft_file_sorter-v0.1.1...ft_file_sorter-v0.1.2) (2026-10-24)
+
+
+### Features
+
+* **release:** configure msix packaging and android platform builds ([1cc9adb](https://github.com/BIGboss248/FtFileSorter/commit/1cc9adb6a70185896bed6deec1aab7a7c532a0e4))
+
 ## [0.1.1](https://github.com/BIGboss248/FtFileSorter/compare/ft_file_sorter-v0.1.0...ft_file_sorter-v0.1.1) (2026-10-24)
 
 
