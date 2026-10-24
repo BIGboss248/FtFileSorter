@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/BIGboss248/FtFileSorter/compare/ft_file_sorter-v0.1.2...ft_file_sorter-v0.1.3) (2026-10-24)
+
+
+### Bug Fixes
+
+* **release:** resolve windows msix config and android gradle version mismatch ([4138dc0](https://github.com/BIGboss248/FtFileSorter/commit/4138dc0ca4adf8f057c7efc1490fa05d721a21ec))
+
 ## [0.1.2](https://github.com/BIGboss248/FtFileSorter/compare/ft_file_sorter-v0.1.1...ft_file_sorter-v0.1.2) (2026-10-24)
 
 
