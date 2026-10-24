@@ -6,6 +6,12 @@ pre-commit:
     analysis:
       run: flutter analyze --fatal-infos
 
+commit-msg:
+  parallel: false
+  commands:
+    lint-commit:
+      run: dart run commitlint_cli --edit {1}
+
 pre-push:
   parallel: false
   commands:

@@ -18,9 +18,28 @@ linter:
     close_sinks: true
 ```
 
-## Lefthook Configuration
+## Commit Lint & Conventional Commits (`commitlint_cli`)
 
-Install `lefthook` (executable binary or via pub) and add `lefthook.yml` at the root:
+To guarantee automated releases with `release-please`, commit messages must adhere to Conventional Commits format (`feat:`, `fix:`, `chore:`, etc.).
+
+1. Add `commitlint_cli` as a development dependency:
+   ```bash
+   flutter pub add --dev commitlint_cli
+   ```
+
+2. Create `commitlint.yaml` at repository root:
+   ```yaml
+   include: package:commitlint_cli/commitlint.yaml
+
+   rules:
+     scope-enum:
+       - 0
+       - never
+   ```
+
+## Hook Configuration (`lefthook.yml`)
+
+Configure `lefthook.yml` at the root with `commit-msg` linting enabled:
 
 ```yaml
 pre-commit:
@@ -31,9 +50,28 @@ pre-commit:
     analysis:
       run: flutter analyze --fatal-infos
 
+commit-msg:
+  parallel: false
+  commands:
+    lint-commit:
+      run: dart run commitlint_cli --edit {1}
+
 pre-push:
   parallel: false
   commands:
     tests:
       run: flutter test
 ```
+
+## Git Hook Fallback (`.githooks/commit-msg`)
+
+For environments without standalone Lefthook binary installed, configure a tracked Git hook:
+1. Create `.githooks/commit-msg`:
+   ```sh
+   #!/bin/sh
+   exec dart run commitlint_cli --edit "$1"
+   ```
+2. Activate tracked hooks in repository:
+   ```bash
+   git config core.hooksPath .githooks
+   ```

@@ -1,2 +1,2 @@
 #!/bin/sh
-exec dart run tool/verify_commit_msg.dart "$1"
+exec dart run commitlint_cli --edit "$1"

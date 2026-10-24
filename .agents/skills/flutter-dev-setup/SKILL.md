@@ -68,12 +68,14 @@ flowchart LR
    - Maintain workspace `mcp.json` for portability across machines.
    - Consult [ai-tools-and-mcp.md](./references/ai-tools-and-mcp.md) for full setup instructions.
 
-### Stage 5: Git Hooks & Formatting Gate
-1. Deploy `lefthook.yml` using [lefthook.yml.template](./resources/templates/lefthook.yml.template).
-2. Enforce automated checks:
+### Stage 5: Git Hooks & Commit Linting Gate
+1. Add `commitlint_cli` (`flutter pub add --dev commitlint_cli`) and configure `commitlint.yaml`.
+2. Deploy `lefthook.yml` with:
    - **Pre-commit**: Runs `dart format --set-exit-if-changed .` and `flutter analyze --fatal-infos`.
+   - **Commit-msg**: Runs `dart run commitlint_cli --edit {1}` to enforce Conventional Commits.
    - **Pre-push**: Runs `flutter test`.
-3. Consult [git-hooks-and-lints.md](./references/git-hooks-and-lints.md) for conventional commits setup.
+3. Set up tracked `.githooks/commit-msg` pointing to `dart run commitlint_cli --edit "$1"` via `git config core.hooksPath .githooks`.
+4. Consult [git-hooks-and-lints.md](./references/git-hooks-and-lints.md) for full configuration details.
 
 ### Stage 6: CI/CD & Automated Semantic Releases
 1. Deploy [.github/workflows/release-please.yml](./resources/templates/release-please.yml.template).
