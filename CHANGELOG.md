@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.5](https://github.com/BIGboss248/FtFileSorter/compare/ft_file_sorter-v0.1.4...ft_file_sorter-v0.1.5) (2026-10-24)
+
+
+### Features
+
+* **release:** add inno setup windows exe installer to release pipeline ([72b739e](https://github.com/BIGboss248/FtFileSorter/commit/72b739eadccecf902c499fe696a8b9c641118ce4))
+
 ## [0.1.4](https://github.com/BIGboss248/FtFileSorter/compare/ft_file_sorter-v0.1.3...ft_file_sorter-v0.1.4) (2026-10-24)
 
 
