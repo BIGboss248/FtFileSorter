@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "skills": {
+    "ag-customizer": {
+      "source": "BIGboss248/skills",
+      "sourceType": "github",
+      "skillPath": "skills/ag-customizer/SKILL.md",
+      "computedHash": "55c2e7db6ece4d13459f74097e3ad335cc5e226a29683d60b546ff9871637a04"
+    },
+    "codebase-memory": {
+      "source": "BIGboss248/skills",
+      "sourceType": "github",
+      "skillPath": "skills/codebase-memory/SKILL.md",
+      "computedHash": "a206ed93a159ccd4cc87af1613c70a13d0b444e43046ba5c36dc20e3a813843a"
+    },
+    "self-repair": {
+      "source": "BIGboss248/skills",
+      "sourceType": "github",
+      "skillPath": "skills/self-repair/SKILL.md",
+      "computedHash": "a79ebcb7d8d93a822cf23369ea5ca2658bfb10cd21f0837123fc72fa1a6cd1f3"
+    }
+  }
+}

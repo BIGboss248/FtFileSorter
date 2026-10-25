@@ -1,0 +1,72 @@
+import 'package:flutter/material.dart';
+
+/// Semantic design tokens compiled from docs/project.json or design specifications.
+@immutable
+class AppSemanticTokens extends ThemeExtension<AppSemanticTokens> {
+  final Color cardBorder;
+  final Color accentSubtle;
+  final Color statusSuccess;
+  final Color statusWarning;
+  final Color statusError;
+
+  const AppSemanticTokens({
+    required this.cardBorder,
+    required this.accentSubtle,
+    required this.statusSuccess,
+    required this.statusWarning,
+    required this.statusError,
+  });
+
+  /// Light theme default tokens
+  static const light = AppSemanticTokens(
+    cardBorder: Color(0xFFE0E2E5),
+    accentSubtle: Color(0xFFEBF2FF),
+    statusSuccess: Color(0xFF198754),
+    statusWarning: Color(0xFFFFC107),
+    statusError: Color(0xFFDC3545),
+  );
+
+  /// Dark theme default tokens
+  static const dark = AppSemanticTokens(
+    cardBorder: Color(0xFF2E3135),
+    accentSubtle: Color(0xFF162B4D),
+    statusSuccess: Color(0xFF75B798),
+    statusWarning: Color(0xFFFFD54F),
+    statusError: Color(0xFFE57373),
+  );
+
+  @override
+  AppSemanticTokens copyWith({
+    Color? cardBorder,
+    Color? accentSubtle,
+    Color? statusSuccess,
+    Color? statusWarning,
+    Color? statusError,
+  }) {
+    return AppSemanticTokens(
+      cardBorder: cardBorder ?? this.cardBorder,
+      accentSubtle: accentSubtle ?? this.accentSubtle,
+      statusSuccess: statusSuccess ?? this.statusSuccess,
+      statusWarning: statusWarning ?? this.statusWarning,
+      statusError: statusError ?? this.statusError,
+    );
+  }
+
+  @override
+  AppSemanticTokens lerp(ThemeExtension<AppSemanticTokens>? other, double t) {
+    if (other is! AppSemanticTokens) return this;
+    return AppSemanticTokens(
+      cardBorder: Color.lerp(cardBorder, other.cardBorder, t)!,
+      accentSubtle: Color.lerp(accentSubtle, other.accentSubtle, t)!,
+      statusSuccess: Color.lerp(statusSuccess, other.statusSuccess, t)!,
+      statusWarning: Color.lerp(statusWarning, other.statusWarning, t)!,
+      statusError: Color.lerp(statusError, other.statusError, t)!,
+    );
+  }
+}
+
+/// Context helper extension for convenient access
+extension SemanticTokensContext on BuildContext {
+  AppSemanticTokens get semanticTokens =>
+      Theme.of(this).extension<AppSemanticTokens>() ?? AppSemanticTokens.light;
+}

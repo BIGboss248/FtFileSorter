@@ -1,16 +1,83 @@
 {
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "project_name": "app",
   "platforms": ["windows"],
-  "state_management": "bloc",
+  "platform_settings": {
+    "desktop": {
+      "window_title": "App",
+      "min_width": 800,
+      "min_height": 600,
+      "persist_window_state": true
+    }
+  },
+  "state_management": {
+    "library": "bloc",
+    "architecture_pattern": "bloc_cubit",
+    "code_generation": false
+  },
   "di_container": "get_it",
-  "networking": "dio",
+  "networking": {
+    "client": "dio",
+    "base_url": "https://api.example.com",
+    "timeout_seconds": 30
+  },
+  "storage": {
+    "local_database": "sqlite3",
+    "key_value_store": "shared_preferences",
+    "secure_storage": false
+  },
   "i18n": {
     "default_locale": "en",
     "supported_locales": ["en"],
-    "rtl_supported": false
+    "rtl_supported": false,
+    "arb_dir": "lib/l10n",
+    "template_arb_file": "app_en.arb"
   },
   "theming": {
     "design_system": "material_3",
-    "supports_dark_mode": true
+    "supports_dark_mode": true,
+    "color_palettes": {
+      "light": {
+        "primary": "#0066FF",
+        "on_primary": "#FFFFFF",
+        "secondary": "#535F70",
+        "on_secondary": "#FFFFFF",
+        "surface": "#F8F9FA",
+        "on_surface": "#1A1C1E",
+        "background": "#FFFFFF",
+        "on_background": "#1A1C1E",
+        "error": "#BA1A1A",
+        "on_error": "#FFFFFF"
+      },
+      "dark": {
+        "primary": "#A8C7FA",
+        "on_primary": "#00315C",
+        "secondary": "#BBC7DB",
+        "on_secondary": "#253140",
+        "surface": "#1A1C1E",
+        "on_surface": "#E2E2E6",
+        "background": "#111315",
+        "on_background": "#E2E2E6",
+        "error": "#FFB4AB",
+        "on_error": "#690005"
+      }
+    },
+    "semantic_tokens": [
+      {
+        "name": "cardBorder",
+        "light": "#E0E2E5",
+        "dark": "#2E3135"
+      },
+      {
+        "name": "accentSubtle",
+        "light": "#EBF2FF",
+        "dark": "#162B4D"
+      },
+      {
+        "name": "statusSuccess",
+        "light": "#198754",
+        "dark": "#75B798"
+      }
+    ]
   }
 }

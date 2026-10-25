@@ -16,6 +16,7 @@ A structured, end-to-end orchestration runbook for discovering, configuring, and
 
 ## Pre-Conditions & Discovery
 
+- [ ] **Specification Inspection**: Read `docs/project.json` if present to configure target platforms, state management, and localization.
 - [ ] **Environment Verification**: Verify Flutter installation and desktop embedding status via `flutter doctor`.
 - [ ] **Workspace Scan**: Inspect existing `pubspec.yaml`, analysis options, and `.vscode/` configs before generating files.
 - [ ] Consult [vscode-and-tooling.md](./references/vscode-and-tooling.md) for launch target profiles.

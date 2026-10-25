@@ -1,0 +1,24 @@
+import 'package:adaptive_theme/adaptive_theme.dart';
+import 'package:flutter/material.dart';
+
+/// Contract for reading and writing app theme preferences.
+abstract interface class IThemeRepository {
+  Future<AdaptiveThemeMode> getInitialThemeMode();
+  Future<void> setThemeMode(AdaptiveThemeMode mode);
+}
+
+/// AdaptiveTheme based repository implementation.
+class AdaptiveThemeRepository implements IThemeRepository {
+  const AdaptiveThemeRepository();
+
+  @override
+  Future<AdaptiveThemeMode> getInitialThemeMode() async {
+    final mode = await AdaptiveTheme.getThemeMode();
+    return mode ?? AdaptiveThemeMode.system;
+  }
+
+  @override
+  Future<void> setThemeMode(AdaptiveThemeMode mode) async {
+    // AdaptiveTheme persists mode internally in SharedPreferences under AdaptiveTheme.prefKey
+  }
+}

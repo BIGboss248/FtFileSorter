@@ -22,7 +22,7 @@ Flutter handles internationalization (i18n) and localization (l10n) via the `flu
 Copy and track this checklist when initializing internationalization in a Flutter project:
 
 - [ ] **Task Progress**
-  - [ ] 1. Add dependencies to `pubspec.yaml`.
+  - [ ] 1. Inspect `docs/project.json` (if present) for `supported_locales`, and add dependencies to `pubspec.yaml`.
   - [ ] 2. Enable the `generate` flag.
   - [ ] 3. Create the `l10n.yaml` configuration file.
   - [ ] 4. Configure `MaterialApp` or `CupertinoApp`.

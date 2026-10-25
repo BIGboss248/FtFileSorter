@@ -1,0 +1,21 @@
+[
+  {
+    "Rule_number": 1,
+    "Category": "PROCESS",
+    "Instruction": "Never add emojis to commit messages - keep commit titles plain Conventional Commits.",
+    "Why": "user preference"
+  },
+  {
+    "Rule_number": 2,
+    "Category": "ARCH",
+    "Instruction": "Always place API route handlers in 'src/server/routes/', never in 'src/api/' - maintain consistent backend architecture.",
+    "Why": "existing codebase pattern"
+  },
+  {
+    "Rule_number": 3,
+    "Category": "CODE",
+    "Instruction": "Always use Zod schemas for input validation on all external entry points - prevent untyped runtime inputs.",
+    "Why": "prevents runtime errors and enforces types"
+  }
+]
+

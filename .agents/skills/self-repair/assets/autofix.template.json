@@ -1,0 +1,8 @@
+[
+  {
+    "Rule_number": 1,
+    "Category": "CODE",
+    "Instruction": "Always verify inputs and handle edge cases gracefully - prevent unexpected runtime crashes.",
+    "Why": "baseline project stability"
+  }
+]
