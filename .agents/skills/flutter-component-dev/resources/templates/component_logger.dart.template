@@ -1,0 +1,72 @@
+import 'dart:developer' as developer;
+
+/// Standardized severity levels for dart:developer.log matching Flutter DevTools
+abstract final class ComponentLogLevel {
+  /// Fine-grained diagnostic messages (500)
+  static const int debug = 500;
+
+  /// High-level lifecycle milestones and user actions (800)
+  static const int info = 800;
+
+  /// Non-fatal irregularities, fallbacks, slow renders (900)
+  static const int warning = 900;
+
+  /// Handled exceptions and async failures (1000)
+  static const int error = 1000;
+
+  /// Unrecoverable invariant breaches and fatal states (1200)
+  static const int fatal = 1200;
+}
+
+/// Convenience logging extension on Object for Flutter widgets & states
+extension ComponentLoggerX on Object {
+  /// Emit a DEBUG log (level 500)
+  void logDebug(String message) {
+    developer.log(
+      message,
+      name: '$runtimeType',
+      level: ComponentLogLevel.debug,
+    );
+  }
+
+  /// Emit an INFO log (level 800)
+  void logInfo(String message) {
+    developer.log(
+      message,
+      name: '$runtimeType',
+      level: ComponentLogLevel.info,
+    );
+  }
+
+  /// Emit a WARN log (level 900)
+  void logWarn(String message, [Object? error]) {
+    developer.log(
+      message,
+      name: '$runtimeType',
+      level: ComponentLogLevel.warning,
+      error: error,
+    );
+  }
+
+  /// Emit an ERROR log (level 1000) with optional error and stackTrace
+  void logError(String message, [Object? error, StackTrace? stackTrace]) {
+    developer.log(
+      message,
+      name: '$runtimeType',
+      level: ComponentLogLevel.error,
+      error: error,
+      stackTrace: stackTrace,
+    );
+  }
+
+  /// Emit a FATAL log (level 1200) for critical invariant failures
+  void logFatal(String message, [Object? error, StackTrace? stackTrace]) {
+    developer.log(
+      message,
+      name: '$runtimeType',
+      level: ComponentLogLevel.fatal,
+      error: error,
+      stackTrace: stackTrace,
+    );
+  }
+}
