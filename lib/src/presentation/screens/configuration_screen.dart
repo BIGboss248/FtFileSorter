@@ -19,13 +19,16 @@ class _ConfigurationScreenState extends State<ConfigurationScreen> {
   // Global form key for validation
   final _formKey = GlobalKey<FormState>();
 
-  // 1. Boolean configuration toggle
-  bool _isAutoSortEnabled = true;
+  // 1. Boolean configuration toggle: Convert to PDF
+  bool _convertToPdf = false;
 
-  // 2. Target folder picker controller
+  // 2. Source folder picker controller (input documents to analyze)
+  final TextEditingController _sourceFolderController = TextEditingController();
+
+  // 3. Destination folder picker controller (where resulting files will be saved)
   final TextEditingController _targetFolderController = TextEditingController();
 
-  // 3. Excel file picker controller
+  // 4. Excel metadata file picker controller
   final TextEditingController _excelFileController = TextEditingController();
 
   // 4. Dynamic Filename Schema Builder segments
@@ -66,6 +69,7 @@ class _ConfigurationScreenState extends State<ConfigurationScreen> {
   @override
   void dispose() {
     // Properly dispose all controllers
+    _sourceFolderController.dispose();
     _targetFolderController.dispose();
     _excelFileController.dispose();
     _testFilenameController.removeListener(_onTestFilenameChanged);
@@ -78,11 +82,34 @@ class _ConfigurationScreenState extends State<ConfigurationScreen> {
     super.dispose();
   }
 
-  // File Picker Methods
+  // File & Directory Picker Methods
+  Future<void> _pickSourceFolder() async {
+    try {
+      final directoryPath = await FilePicker.platform.getDirectoryPath(
+        dialogTitle: 'Select Source Documents Folder (To Analyze)',
+      );
+
+      if (directoryPath != null && directoryPath.isNotEmpty) {
+        setState(() {
+          _sourceFolderController.text = directoryPath;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to pick source directory: $e'),
+            backgroundColor: Theme.of(context).colorScheme.error,
+          ),
+        );
+      }
+    }
+  }
+
   Future<void> _pickTargetFolder() async {
     try {
       final directoryPath = await FilePicker.platform.getDirectoryPath(
-        dialogTitle: 'Select Target Folder',
+        dialogTitle: 'Select Destination Folder (Resulting Files)',
       );
 
       if (directoryPath != null && directoryPath.isNotEmpty) {
@@ -191,22 +218,22 @@ class _ConfigurationScreenState extends State<ConfigurationScreen> {
             child: ListView(
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
               children: [
-                // 1. Boolean Configuration Toggle
+                // 1. Boolean Configuration Checkbox
                 Card(
                   elevation: 0,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                     side: BorderSide(color: colorScheme.outlineVariant),
                   ),
-                  child: SwitchListTile(
+                  child: CheckboxListTile(
                     title: Text(
-                      'Automated Sorting & Archive Processing',
+                      'Convert to PDF',
                       style: theme.textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.w600,
                       ),
                     ),
                     subtitle: Text(
-                      'Enable automatic parsing, sorting, and directory routing for matching documents.',
+                      'Automatically convert processed documents to PDF format during sorting.',
                       style: theme.textTheme.bodyMedium?.copyWith(
                         color: colorScheme.onSurfaceVariant,
                       ),
@@ -214,24 +241,22 @@ class _ConfigurationScreenState extends State<ConfigurationScreen> {
                     secondary: Container(
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
-                        color: _isAutoSortEnabled
+                        color: _convertToPdf
                             ? colorScheme.primaryContainer
                             : colorScheme.surfaceContainerHighest,
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Icon(
-                        _isAutoSortEnabled
-                            ? Icons.auto_mode
-                            : Icons.pause_circle_outline,
-                        color: _isAutoSortEnabled
+                        Icons.picture_as_pdf_outlined,
+                        color: _convertToPdf
                             ? colorScheme.primary
                             : colorScheme.onSurfaceVariant,
                       ),
                     ),
-                    value: _isAutoSortEnabled,
+                    value: _convertToPdf,
                     onChanged: (value) {
                       setState(() {
-                        _isAutoSortEnabled = value;
+                        _convertToPdf = value ?? false;
                       });
                     },
                   ),
@@ -239,7 +264,7 @@ class _ConfigurationScreenState extends State<ConfigurationScreen> {
 
                 const SizedBox(height: 16),
 
-                // 2. Target Folder Picker Section
+                // 2. Source Documents Folder (To Analyze)
                 Card(
                   elevation: 0,
                   shape: RoundedRectangleBorder(
@@ -252,14 +277,14 @@ class _ConfigurationScreenState extends State<ConfigurationScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Target Destination Directory',
+                          'Source Documents Folder (To Analyze)',
                           style: theme.textTheme.titleSmall?.copyWith(
                             fontWeight: FontWeight.bold,
                           ),
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          'The root directory where sorted files will be moved or organized.',
+                          'The folder containing the incoming documents and files to analyze.',
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: colorScheme.onSurfaceVariant,
                           ),
@@ -270,11 +295,11 @@ class _ConfigurationScreenState extends State<ConfigurationScreen> {
                           children: [
                             Expanded(
                               child: TextFormField(
-                                controller: _targetFolderController,
+                                controller: _sourceFolderController,
                                 decoration: InputDecoration(
-                                  labelText: 'Target Folder Path',
-                                  hintText: r'e.g. C:\Users\Admin\SortedFiles',
-                                  prefixIcon: const Icon(Icons.folder_outlined),
+                                  labelText: 'Source Folder Path',
+                                  hintText: r'e.g. C:\Users\Admin\IncomingDocs',
+                                  prefixIcon: const Icon(Icons.source_outlined),
                                   border: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(8),
                                   ),
@@ -285,7 +310,7 @@ class _ConfigurationScreenState extends State<ConfigurationScreen> {
                                 ),
                                 validator: (value) {
                                   if (value == null || value.trim().isEmpty) {
-                                    return 'Target directory path is required.';
+                                    return 'Source documents directory path is required.';
                                   }
                                   return null;
                                 },
@@ -295,9 +320,9 @@ class _ConfigurationScreenState extends State<ConfigurationScreen> {
                             SizedBox(
                               height: 48,
                               child: FilledButton.icon(
-                                onPressed: _pickTargetFolder,
+                                onPressed: _pickSourceFolder,
                                 icon: const Icon(Icons.folder_open),
-                                label: const Text('Browse Folder'),
+                                label: const Text('Browse Source'),
                                 style: FilledButton.styleFrom(
                                   shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(8),
@@ -314,7 +339,7 @@ class _ConfigurationScreenState extends State<ConfigurationScreen> {
 
                 const SizedBox(height: 16),
 
-                // 3. Excel File Picker Section
+                // 3. Destination Folder (Resulting Files)
                 Card(
                   elevation: 0,
                   shape: RoundedRectangleBorder(
@@ -327,14 +352,89 @@ class _ConfigurationScreenState extends State<ConfigurationScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Excel / CSV Mapping File',
+                          'Destination Folder (Resulting Files)',
                           style: theme.textTheme.titleSmall?.copyWith(
                             fontWeight: FontWeight.bold,
                           ),
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          'Select the reference spreadsheet (*.xlsx, *.xls, *.csv) containing catalog metadata.',
+                          'The root directory where resulting and sorted files will be saved.',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: TextFormField(
+                                controller: _targetFolderController,
+                                decoration: InputDecoration(
+                                  labelText: 'Destination Folder Path',
+                                  hintText: r'e.g. C:\Users\Admin\SortedFiles',
+                                  prefixIcon: const Icon(Icons.folder_outlined),
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 14,
+                                    vertical: 14,
+                                  ),
+                                ),
+                                validator: (value) {
+                                  if (value == null || value.trim().isEmpty) {
+                                    return 'Destination directory path is required.';
+                                  }
+                                  return null;
+                                },
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            SizedBox(
+                              height: 48,
+                              child: FilledButton.icon(
+                                onPressed: _pickTargetFolder,
+                                icon: const Icon(Icons.drive_file_move_outlined),
+                                label: const Text('Browse Destination'),
+                                style: FilledButton.styleFrom(
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 16),
+
+                // 4. Excel Metadata File Picker Section
+                Card(
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    side: BorderSide(color: colorScheme.outlineVariant),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Excel Metadata File',
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Select the reference metadata spreadsheet (*.xlsx, *.xls, *.csv) containing document records.',
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: colorScheme.onSurfaceVariant,
                           ),
@@ -347,8 +447,8 @@ class _ConfigurationScreenState extends State<ConfigurationScreen> {
                               child: TextFormField(
                                 controller: _excelFileController,
                                 decoration: InputDecoration(
-                                  labelText: 'Spreadsheet File Path',
-                                  hintText: r'e.g. C:\Data\Catalog_Index.xlsx',
+                                  labelText: 'Metadata Excel / CSV File Path',
+                                  hintText: r'e.g. C:\Data\Metadata_Catalog.xlsx',
                                   prefixIcon: const Icon(Icons.table_chart_outlined),
                                   border: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(8),
@@ -360,7 +460,7 @@ class _ConfigurationScreenState extends State<ConfigurationScreen> {
                                 ),
                                 validator: (value) {
                                   if (value == null || value.trim().isEmpty) {
-                                    return 'Reference Excel/CSV file path is required.';
+                                    return 'Reference metadata Excel/CSV file path is required.';
                                   }
                                   return null;
                                 },
@@ -416,41 +516,41 @@ class _ConfigurationScreenState extends State<ConfigurationScreen> {
                     ),
 
                     // Delimiter Selector
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          'Delimiter:',
-                          style: theme.textTheme.labelMedium?.copyWith(
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        SegmentedButton<String>(
-                          segments: const [
-                            ButtonSegment(
-                              value: '',
-                              label: Text('None'),
-                            ),
-                            ButtonSegment(
-                              value: '_',
-                              label: Text('_ (Underscore)'),
-                            ),
-                            ButtonSegment(
-                              value: '-',
-                              label: Text('- (Hyphen)'),
-                            ),
-                          ],
-                          selected: {_selectedDelimiter},
-                          onSelectionChanged: (newSelection) {
-                            setState(() {
-                              _selectedDelimiter = newSelection.first;
-                              _generateDefaultSampleTestFilename();
-                            });
-                          },
-                        ),
-                      ],
-                    ),
+                    // Row(
+                    //   mainAxisSize: MainAxisSize.min,
+                    //   children: [
+                    //     Text(
+                    //       'Delimiter:',
+                    //       style: theme.textTheme.labelMedium?.copyWith(
+                    //         fontWeight: FontWeight.w600,
+                    //       ),
+                    //     ),
+                    //     const SizedBox(width: 8),
+                    //     SegmentedButton<String>(
+                    //       segments: const [
+                    //         ButtonSegment(
+                    //           value: '',
+                    //           label: Text('None'),
+                    //         ),
+                    //         ButtonSegment(
+                    //           value: '_',
+                    //           label: Text('_ (Underscore)'),
+                    //         ),
+                    //         ButtonSegment(
+                    //           value: '-',
+                    //           label: Text('- (Hyphen)'),
+                    //         ),
+                    //       ],
+                    //       selected: {_selectedDelimiter},
+                    //       onSelectionChanged: (newSelection) {
+                    //         setState(() {
+                    //           _selectedDelimiter = newSelection.first;
+                    //           _generateDefaultSampleTestFilename();
+                    //         });
+                    //       },
+                    //     ),
+                    //   ],
+                    // ),
                   ],
                 ),
 

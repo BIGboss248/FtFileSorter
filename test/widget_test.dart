@@ -21,14 +21,15 @@ void main() {
     await tester.pumpWidget(const MyApp());
     await tester.pumpAndSettle();
 
-    // 1. Boolean Toggle
+    // 1. Boolean Checkbox
     expect(
-      find.text('Automated Sorting & Archive Processing'),
+      find.text('Convert to PDF'),
       findsOneWidget,
     );
 
-    // 2. Folder and Excel pickers
-    expect(find.text('Browse Folder'), findsOneWidget);
+    // 2. Both Folder pickers and Excel metadata picker
+    expect(find.text('Browse Source'), findsOneWidget);
+    expect(find.text('Browse Destination'), findsOneWidget);
     expect(find.text('Select Excel'), findsOneWidget);
 
     // 3. Schema builder segments (find each inside SegmentCard)
@@ -41,7 +42,12 @@ void main() {
     expect(find.text('Live Filename Schema Preview'), findsOneWidget);
     expect(find.textContaining('Total Base Length: 31 chars'), findsOneWidget);
 
-    // 5. Test Filename Parser Section
+    // 5. Test Filename Parser Section (scroll until visible in the ListView)
+    await tester.scrollUntilVisible(
+      find.text('Test Filename Parser'),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
     expect(find.text('Test Filename Parser'), findsOneWidget);
   });
 }
