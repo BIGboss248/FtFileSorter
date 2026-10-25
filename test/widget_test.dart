@@ -1,30 +1,47 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-
 import 'package:ft_file_sorter/main.dart';
+import 'package:ft_file_sorter/src/presentation/widgets/segment_card.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:shared_preferences_platform_interface/in_memory_shared_preferences_async.dart';
+import 'package:shared_preferences_platform_interface/shared_preferences_async_platform_interface.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+    SharedPreferencesAsyncPlatform.instance =
+        InMemorySharedPreferencesAsync.empty();
+  });
+
+  testWidgets('ConfigurationScreen renders all sections correctly', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(1920, 1080);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+
     await tester.pumpWidget(const MyApp());
+    await tester.pumpAndSettle();
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    // 1. Boolean Toggle
+    expect(
+      find.text('Automated Sorting & Archive Processing'),
+      findsOneWidget,
+    );
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+    // 2. Folder and Excel pickers
+    expect(find.text('Browse Folder'), findsOneWidget);
+    expect(find.text('Select Excel'), findsOneWidget);
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    // 3. Schema builder segments (find each inside SegmentCard)
+    expect(find.widgetWithText(SegmentCard, 'Main Code'), findsOneWidget);
+    expect(find.widgetWithText(SegmentCard, 'Index 1'), findsOneWidget);
+    expect(find.widgetWithText(SegmentCard, 'Index 2'), findsOneWidget);
+    expect(find.widgetWithText(SegmentCard, 'Revision'), findsOneWidget);
+
+    // 4. Live Schema Preview
+    expect(find.text('Live Filename Schema Preview'), findsOneWidget);
+    expect(find.textContaining('Total Base Length: 31 chars'), findsOneWidget);
+
+    // 5. Test Filename Parser Section
+    expect(find.text('Test Filename Parser'), findsOneWidget);
   });
 }

@@ -18,6 +18,12 @@
       "sourceType": "github",
       "skillPath": "skills/self-repair/SKILL.md",
       "computedHash": "a79ebcb7d8d93a822cf23369ea5ca2658bfb10cd21f0837123fc72fa1a6cd1f3"
+    },
+    "skill-creator": {
+      "source": "BIGboss248/skills",
+      "sourceType": "github",
+      "skillPath": "skills/skill-creator/SKILL.md",
+      "computedHash": "889c2675cedc9d77db61073f57da95fb6a93144692ae09ef6dc723d106b3279f"
     }
   }
 }
