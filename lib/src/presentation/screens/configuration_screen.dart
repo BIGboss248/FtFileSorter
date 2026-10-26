@@ -7,6 +7,7 @@ import '../widgets/schema_preview_container.dart';
 import '../widgets/segment_card.dart';
 import '../widgets/test_parser_section.dart';
 import 'document_analyzer_screen.dart';
+import 'excel_analyzer_screen.dart';
 
 /// Production-ready configuration screen for desktop file sorting and filename schema configuration.
 class ConfigurationScreen extends StatefulWidget {
@@ -186,6 +187,18 @@ class _ConfigurationScreenState extends State<ConfigurationScreen> {
         title: const Text('Desktop Sorter & Filename Parser Configuration'),
         centerTitle: false,
         actions: [
+          FilledButton.tonalIcon(
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const ExcelAnalyzerScreen(),
+                ),
+              );
+            },
+            icon: const Icon(Icons.table_chart_outlined, size: 18),
+            label: const Text('Excel Analyzer'),
+          ),
+          const SizedBox(width: 8),
           FilledButton.tonalIcon(
             onPressed: () {
               Navigator.of(context).push(
