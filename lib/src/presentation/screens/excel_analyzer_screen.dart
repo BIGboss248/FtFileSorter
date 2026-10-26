@@ -1,5 +1,6 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../../core/theme/widgets/animated_theme_toggle.dart';
 import '../../data/models/excel_file_metadata.dart';
 import '../../logic/services/excel_metadata_service.dart';
@@ -25,7 +26,7 @@ class _ExcelAnalyzerScreenState extends State<ExcelAnalyzerScreen> {
 
   // State
   bool _isLoading = false;
-  String? _errorMessage = null;
+  String? _errorMessage;
   ExcelFileMetadata? _metadata;
   int? _selectedColumnIndex;
 
@@ -85,6 +86,8 @@ class _ExcelAnalyzerScreenState extends State<ExcelAnalyzerScreen> {
         // Default to auto-detected column or first column
         _selectedColumnIndex = metadata.autoDetectedDocCodeColumnIndex ??
             (metadata.columns.isNotEmpty ? metadata.columns.first.index : null);
+        _currentCodeIndex = 0;
+        _updateBrowsedCode();
       });
     } catch (e) {
       setState(() {
@@ -92,6 +95,61 @@ class _ExcelAnalyzerScreenState extends State<ExcelAnalyzerScreen> {
         _errorMessage = e.toString();
         _metadata = null;
         _selectedColumnIndex = null;
+        _browsedCodeController.clear();
+        _currentCodeIndex = 0;
+      });
+    }
+  }
+
+  /// Get list of non-empty codes from the currently selected column
+  List<String> get _currentCodes {
+    if (_metadata == null || _selectedColumnIndex == null) return [];
+    final colIdx = _selectedColumnIndex!;
+    final List<String> codes = [];
+    for (final row in _metadata!.allRows) {
+      if (colIdx < row.length) {
+        final val = row[colIdx].trim();
+        if (val.isNotEmpty) {
+          codes.add(val);
+        }
+      }
+    }
+    return codes;
+  }
+
+  void _updateBrowsedCode() {
+    final codes = _currentCodes;
+    if (codes.isEmpty) {
+      _browsedCodeController.text = '';
+      _currentCodeIndex = 0;
+    } else {
+      if (_currentCodeIndex >= codes.length) {
+        _currentCodeIndex = codes.length - 1;
+      } else if (_currentCodeIndex < 0) {
+        _currentCodeIndex = 0;
+      }
+      _browsedCodeController.text = codes[_currentCodeIndex];
+    }
+  }
+
+  void _goToPreviousCode() {
+    final codes = _currentCodes;
+    if (codes.isEmpty) return;
+    if (_currentCodeIndex > 0) {
+      setState(() {
+        _currentCodeIndex--;
+        _updateBrowsedCode();
+      });
+    }
+  }
+
+  void _goToNextCode() {
+    final codes = _currentCodes;
+    if (codes.isEmpty) return;
+    if (_currentCodeIndex < codes.length - 1) {
+      setState(() {
+        _currentCodeIndex++;
+        _updateBrowsedCode();
       });
     }
   }
@@ -304,7 +362,7 @@ class _ExcelAnalyzerScreenState extends State<ExcelAnalyzerScreen> {
                             ),
                             const SizedBox(height: 6),
                             DropdownButtonFormField<String>(
-                              value: _metadata!.selectedSheet,
+                              initialValue: _metadata!.selectedSheet,
                               decoration: InputDecoration(
                                 border: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(8),
@@ -349,7 +407,7 @@ class _ExcelAnalyzerScreenState extends State<ExcelAnalyzerScreen> {
                           const SizedBox(height: 8),
 
                           DropdownButtonFormField<int>(
-                            value: _selectedColumnIndex,
+                            initialValue: _selectedColumnIndex,
                             isExpanded: true,
                             decoration: InputDecoration(
                               labelText: 'Select Document Code Column',
@@ -401,6 +459,8 @@ class _ExcelAnalyzerScreenState extends State<ExcelAnalyzerScreen> {
                             onChanged: (val) {
                               setState(() {
                                 _selectedColumnIndex = val;
+                                _currentCodeIndex = 0;
+                                _updateBrowsedCode();
                               });
                             },
                           ),
@@ -437,6 +497,133 @@ class _ExcelAnalyzerScreenState extends State<ExcelAnalyzerScreen> {
                               ),
                             ),
                           ],
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  // 2. Code Browser Section (Text Box + Prev / Next Arrows)
+                  Card(
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      side: BorderSide(color: colorScheme.outlineVariant),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(Icons.find_in_page_outlined, color: colorScheme.primary),
+                              const SizedBox(width: 8),
+                              Text(
+                                'Browse Document Codes',
+                                style: theme.textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const Spacer(),
+                              if (_currentCodes.isNotEmpty)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 4,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: colorScheme.secondaryContainer,
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Text(
+                                    '${_currentCodeIndex + 1} of ${_currentCodes.length}',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 12,
+                                      color: colorScheme.onSecondaryContainer,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Navigate through extracted document codes from the chosen column.',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          Row(
+                            children: [
+                              // Previous Arrow Button
+                              IconButton.filledTonal(
+                                icon: const Icon(Icons.arrow_back),
+                                tooltip: 'Previous Code',
+                                onPressed: (_currentCodes.isNotEmpty && _currentCodeIndex > 0)
+                                    ? _goToPreviousCode
+                                    : null,
+                              ),
+                              const SizedBox(width: 12),
+                              // Code Display Text Box
+                              Expanded(
+                                child: TextFormField(
+                                  controller: _browsedCodeController,
+                                  readOnly: true,
+                                  style: const TextStyle(
+                                    fontFamily: 'monospace',
+                                    fontWeight: FontWeight.bold,
+                                    letterSpacing: 1.2,
+                                  ),
+                                  decoration: InputDecoration(
+                                    labelText: 'Current Document Code',
+                                    hintText: _currentCodes.isEmpty
+                                        ? 'No codes found in this column'
+                                        : '',
+                                    prefixIcon: const Icon(Icons.code),
+                                    suffixIcon: _browsedCodeController.text.isNotEmpty
+                                        ? IconButton(
+                                            icon: const Icon(Icons.copy, size: 20),
+                                            tooltip: 'Copy Code',
+                                            onPressed: () {
+                                              Clipboard.setData(
+                                                ClipboardData(
+                                                  text: _browsedCodeController.text,
+                                                ),
+                                              );
+                                              ScaffoldMessenger.of(context).showSnackBar(
+                                                const SnackBar(
+                                                  content: Text('Document code copied to clipboard'),
+                                                  duration: Duration(seconds: 1),
+                                                ),
+                                              );
+                                            },
+                                          )
+                                        : null,
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    contentPadding: const EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                      vertical: 14,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              // Next Arrow Button
+                              IconButton.filledTonal(
+                                icon: const Icon(Icons.arrow_forward),
+                                tooltip: 'Next Code',
+                                onPressed: (_currentCodes.isNotEmpty &&
+                                        _currentCodeIndex < _currentCodes.length - 1)
+                                    ? _goToNextCode
+                                    : null,
+                              ),
+                            ],
+                          ),
                         ],
                       ),
                     ),
