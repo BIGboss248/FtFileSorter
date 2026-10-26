@@ -1,12 +1,12 @@
 ---
 name: flutter-dev-setup
 description: >-
-  Bootstrap, configure, and verify the Flutter development environment, including flavors, launch configurations, linting rules, Git hooks, and automated CI/CD releases.
+  Bootstrap, configure, and verify the Flutter development environment, including flavors, launch configurations, linting rules, Git hooks, GitHub triage setup, and automated CI/CD releases. Triggers on "/flutter-dev-setup", "setup flutter dev environment", or "initialize flutter project".
 ---
 
 # Flutter Development Setup (`flutter-dev-setup`)
 
-A structured, end-to-end orchestration runbook for discovering, configuring, and verifying the Flutter development environment, analysis options, VS Code launch targets, build flavors, Git hooks, official Flutter/Dart skills installation, MCP tool integration, and automated GitHub Actions release automation.
+A structured, end-to-end orchestration runbook for discovering, configuring, and verifying the Flutter development environment, analysis options, VS Code launch targets, build flavors, Git hooks, GitHub triage infrastructure, official Flutter/Dart skills installation, MCP tool integration, and automated GitHub Actions release automation.
 
 > [!TIP]
 > **Official Reference:**
@@ -32,7 +32,7 @@ flowchart LR
     S2 --> S3["3. Flavors & Configs<br/>(--dart-define-from-file)"]
     S3 --> S4["4. Skills & MCP Tools<br/>(Install skills & AG MCP)"]
     S4 --> S5["5. Git Hooks<br/>(Lefthook pre-commit / pre-push)"]
-    S5 --> S6["6. CI/CD & Releases<br/>(Release Please & MSIX / Zip)"]
+    S5 --> S6["6. Triage Setup & CI/CD<br/>(Issue Templates, Labels & Releases)"]
 ```
 
 ### Stage 1: VS Code Launch Options & IDE Tooling
@@ -78,19 +78,21 @@ flowchart LR
 3. Set up tracked `.githooks/commit-msg` pointing to `dart run commitlint_cli --edit "$1"` via `git config core.hooksPath .githooks`.
 4. Consult [git-hooks-and-lints.md](./references/git-hooks-and-lints.md) for full configuration details.
 
-### Stage 6: CI/CD & Automated Semantic Releases (Windows & Android)
-1. Deploy [.github/workflows/release-please.yml](./resources/templates/release-please.yml.template).
-2. Configure Release Please manifest files:
+### Stage 6: GitHub Triage Setup, CI/CD & Automated Semantic Releases (Windows & Android)
+1. **GitHub Triage Infrastructure Setup**:
+   - Execute [`init_triage_infra.ps1`](./scripts/init_triage_infra.ps1) to scaffold `.github/ISSUE_TEMPLATE/bug_report.yml` (from [bug_report.yml.template](./resources/templates/bug_report.yml.template)) and `.github/ISSUE_TEMPLATE/config.yml` (from [issue_config.yml.template](./resources/templates/issue_config.yml.template)), and register standard GitHub triage labels (`bug`, `agent-triage`, `self-repair`, `verified`) for `github-triage`.
+2. Deploy [.github/workflows/release-please.yml](./resources/templates/release-please.yml.template).
+3. Configure Release Please manifest files:
    - `release-please-config.json` configured for Dart/Flutter packages.
    - `.release-please-manifest.json` tracking current release versions.
-3. Configure Windows MSIX & Inno Setup packaging:
+4. Configure Windows MSIX & Inno Setup packaging:
    - Configure `msix` in `dev_dependencies` and `msix_config` in `pubspec.yaml`: format `capabilities` as a comma-separated string (e.g., `capabilities: internetClient`), never a YAML list, and set `install_certificate: false`.
    - Deploy `windows/installer/setup.iss` using [setup.iss.template](./resources/templates/setup.iss.template) to compile a standalone `.exe` installer via Inno Setup (`ISCC.exe "/DMyAppVersion=<version>" windows\installer\setup.iss`) before running `msix:create` so the `.exe` installer does not accidentally bundle the `.msix` file.
-4. Verify Android Gradle & Kotlin compatibility for CI (`flutter analyze --suggestions`):
+5. Verify Android Gradle & Kotlin compatibility for CI (`flutter analyze --suggestions`):
    - Set Gradle wrapper `distributionUrl` to at least `gradle-9.1.0-all.zip` in `android/gradle/wrapper/gradle-wrapper.properties`.
    - Set `com.android.application` (AGP) to `8.11.1`+ and `org.jetbrains.kotlin.android` to `2.2.0`+ in `android/settings.gradle.kts`, and `android.newDsl=false` in `android/gradle.properties`.
-5. Configure `concurrency: cancel-in-progress: false` on release jobs to protect ongoing builds on `main`, and deploy both Windows (`.exe` setup installer, `.msix` package, and `.zip` portable archive) and Android (`.apk` + `.aab`) artifacts to the GitHub Release page via `gh release upload --clobber`.
-6. Consult [release-please-and-cicd.md](./references/release-please-and-cicd.md) for Windows Inno Setup `.exe`, MSIX, Android APK/AAB, and archive bundling specs.
+6. Configure `concurrency: cancel-in-progress: false` on release jobs to protect ongoing builds on `main`, and deploy both Windows (`.exe` setup installer, `.msix` package, and `.zip` portable archive) and Android (`.apk` + `.aab`) artifacts to the GitHub Release page via `gh release upload --clobber`.
+7. Consult [release-please-and-cicd.md](./references/release-please-and-cicd.md) for GitHub triage setup, Windows Inno Setup `.exe`, MSIX, Android APK/AAB, and archive bundling specs.
 
 ---
 
@@ -113,4 +115,5 @@ flowchart LR
 - [Git Hooks & Analysis Guide](./references/git-hooks-and-lints.md)
 - [AI Tools & MCP Integration Guide](./references/ai-tools-and-mcp.md)
 - [Release Please & CI/CD Guide](./references/release-please-and-cicd.md)
+- [GitHub Triage Infrastructure Script](./scripts/init_triage_infra.ps1)
 - [Environment Verification Script](./scripts/verify-env.ps1)

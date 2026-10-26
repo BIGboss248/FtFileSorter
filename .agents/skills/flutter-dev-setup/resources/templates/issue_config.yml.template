@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: GitHub Triage & Self-Repair Documentation
+    url: https://github.com
+    about: Repository bug tracking and automated agent triage integration

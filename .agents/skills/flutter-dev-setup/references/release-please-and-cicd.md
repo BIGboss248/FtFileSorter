@@ -1,4 +1,23 @@
-# Release Please & CI/CD Guide (`flutter-dev-setup`)
+# Release Please, GitHub Triage Setup & CI/CD Guide (`flutter-dev-setup`)
+
+## GitHub Triage Infrastructure Setup
+
+Initialize the repository's GitHub Issues templates and standard triage labels during project setup so the `github-triage` skill can track bugs, log root cause diagnostics, and link `.agents/autofix.json` rules immediately:
+
+1. **Issue Templates**:
+   - `.github/ISSUE_TEMPLATE/bug_report.yml` from [`bug_report.yml.template`](../resources/templates/bug_report.yml.template)
+   - `.github/ISSUE_TEMPLATE/config.yml` from [`issue_config.yml.template`](../resources/templates/issue_config.yml.template)
+2. **Automated Initialization & Label Sync (`init_triage_infra.ps1`)**:
+   Execute [`scripts/init_triage_infra.ps1`](../scripts/init_triage_infra.ps1) to scaffold `.github/ISSUE_TEMPLATE/` and ensure standard triage labels exist in the remote repository via `gh label create --force`:
+   - `bug` (`#d73a4a`): Something isn't working
+   - `agent-triage` (`#0e8a16`): Triaged and managed by AI agent
+   - `self-repair` (`#1d76db`): Linked to an `autofix.json` imperative rule
+   - `verified` (`#5319e7`): Fix verified through automated test suites
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .agents/skills/flutter-dev-setup/scripts/init_triage_infra.ps1
+   ```
+
+---
 
 ## Release Please Manifests
 

@@ -1,0 +1,50 @@
+name: Bug Report
+description: File a bug report, runtime crash, or regression
+title: "fix: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting an issue! Please provide reproduction steps and relevant logs.
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear and concise description of what the bug is.
+      placeholder: Describe the problem...
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: How can the issue be reproduced?
+      placeholder: |
+        1. Run 'flutter run -d windows' (or target device)...
+        2. Navigate to screen '...'
+        3. Observe error...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs Actual Behavior
+      description: What did you expect to happen, and what happened instead?
+      placeholder: |
+        Expected: ...
+        Actual: ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error Logs or Stack Trace
+      description: Paste any Flutter/Dart exception logs, stack traces, or flutter doctor output.
+      render: shell
+  - type: input
+    id: environment
+    attributes:
+      label: Environment Details
+      description: Target platform (Windows / Android / iOS), Flutter version, Dart version, etc.
+      placeholder: Windows 11 / Android 15, Flutter 3.x, Dart 3.x
