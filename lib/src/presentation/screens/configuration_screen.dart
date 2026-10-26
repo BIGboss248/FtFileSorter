@@ -6,6 +6,7 @@ import '../../logic/services/filename_parser_service.dart';
 import '../widgets/schema_preview_container.dart';
 import '../widgets/segment_card.dart';
 import '../widgets/test_parser_section.dart';
+import 'document_analyzer_screen.dart';
 
 /// Production-ready configuration screen for desktop file sorting and filename schema configuration.
 class ConfigurationScreen extends StatefulWidget {
@@ -185,6 +186,18 @@ class _ConfigurationScreenState extends State<ConfigurationScreen> {
         title: const Text('Desktop Sorter & Filename Parser Configuration'),
         centerTitle: false,
         actions: [
+          FilledButton.tonalIcon(
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const DocumentAnalyzerScreen(),
+                ),
+              );
+            },
+            icon: const Icon(Icons.analytics_outlined, size: 18),
+            label: const Text('Document Code Analyzer'),
+          ),
+          const SizedBox(width: 8),
           IconButton(
             tooltip: 'Reset to Default Schema',
             icon: const Icon(Icons.restore),
