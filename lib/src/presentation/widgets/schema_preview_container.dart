@@ -74,12 +74,12 @@ class SchemaPreviewContainer extends StatelessWidget {
       }
     }
 
-    // Append .ext in grey
+    // Append .ext in a muted color
     previewSpans.add(
-      const TextSpan(
+      TextSpan(
         text: '.ext',
         style: TextStyle(
-          color: Colors.grey,
+          color: colorScheme.outline,
           fontWeight: FontWeight.normal,
         ),
       ),
@@ -89,9 +89,7 @@ class SchemaPreviewContainer extends StatelessWidget {
       decoration: BoxDecoration(
         color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.35),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: colorScheme.outlineVariant,
-        ),
+        border: Border.all(color: colorScheme.outlineVariant),
       ),
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -149,30 +147,18 @@ class SchemaPreviewContainer extends StatelessWidget {
 
           // Monospace dummy preview box
           Container(
-            padding: const EdgeInsets.symmetric(
-              horizontal: 14,
-              vertical: 12,
-            ),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             decoration: BoxDecoration(
-              color: theme.brightness == Brightness.dark
-                  ? const Color(0xFF111827)
-                  : const Color(0xFFF8FAFC),
+              color: colorScheme.surfaceContainerLowest,
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(
-                color: theme.brightness == Brightness.dark
-                    ? const Color(0xFF1F2937)
-                    : const Color(0xFFE2E8F0),
-              ),
+              border: Border.all(color: colorScheme.outlineVariant),
             ),
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: SelectableText.rich(
                 TextSpan(
                   children: previewSpans,
-                  style: const TextStyle(
-                    fontFamily: 'Consolas',
-                    fontSize: 16,
-                  ),
+                  style: const TextStyle(fontFamily: 'Consolas', fontSize: 16),
                 ),
               ),
             ),
@@ -186,16 +172,11 @@ class SchemaPreviewContainer extends StatelessWidget {
             runSpacing: 8,
             children: legendItems.map((item) {
               return Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 8,
-                  vertical: 4,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
                   color: item.color.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(6),
-                  border: Border.all(
-                    color: item.color.withValues(alpha: 0.3),
-                  ),
+                  border: Border.all(color: item.color.withValues(alpha: 0.3)),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,

@@ -17,22 +17,22 @@ class AppSemanticTokens extends ThemeExtension<AppSemanticTokens> {
     required this.statusError,
   });
 
-  /// Light theme tokens
+  /// Light theme tokens (aligned with AppTheme.lightScheme)
   static const light = AppSemanticTokens(
-    cardBorder: Color(0xFFE2E8F0),
-    accentSubtle: Color(0xFFEFF6FF),
-    statusSuccess: Color(0xFF16A34A),
-    statusWarning: Color(0xFFD97706),
-    statusError: Color(0xFFDC2626),
+    cardBorder: Color(0xFFCAC4D0),
+    accentSubtle: Color(0xFFF7F2FA),
+    statusSuccess: Color(0xFF2E7D32),
+    statusWarning: Color(0xFFF57C00),
+    statusError: Color(0xFFBA1A1A),
   );
 
-  /// Dark theme tokens
+  /// Dark theme tokens (aligned with AppTheme.darkScheme)
   static const dark = AppSemanticTokens(
-    cardBorder: Color(0xFF334155),
-    accentSubtle: Color(0xFF1E293B),
-    statusSuccess: Color(0xFF22C55E),
-    statusWarning: Color(0xFFF59E0B),
-    statusError: Color(0xFFEF4444),
+    cardBorder: Color(0xFF49454F),
+    accentSubtle: Color(0xFF1D1418),
+    statusSuccess: Color(0xFF66BB6A),
+    statusWarning: Color(0xFFFFB74D),
+    statusError: Color(0xFFFFB4AB),
   );
 
   @override
