@@ -23,6 +23,11 @@ const String _usage =
     '                             without a complete code go to <dest>/no_code/.\n'
     '  --copy-duplicates=<dest>   Copy only files whose code is shared.\n'
     '  --overwrite-duplicates     Replace files already present in <dest>.\n'
+    '  --allowed-types=<rules>    After copying, move files that are not allowed\n'
+    '                             for their document type into <dest>/trash/.\n'
+    '                             Format: "JC=dwg,pdf;JA=pdf". Extensions are\n'
+    '                             case-insensitive, dots optional, "*" keeps all.\n'
+    '                             Types not listed are left untouched. Repeatable.\n'
     '  --reindex                  Index again even when a CSV already exists.\n'
     '  --reuse-index              Reuse an existing CSV without asking.\n'
     '  --recopy                   Copy again even when <dest> already has a copy.\n'
@@ -36,7 +41,7 @@ enum _CopyMode { byCode, duplicates }
 
 /// Indexes a folder, writes a CSV, and optionally copies files by document code.
 ///
-/// The tool runs in two phases:
+/// The tool runs in three phases:
 ///
 /// 1. **Index** — scans `<folder>` and writes the CSV (default
 ///    `<folder>/file_index.csv`). When a reusable CSV already exists the user is
@@ -47,6 +52,9 @@ enum _CopyMode { byCode, duplicates }
 ///    the `Copied To` path for every file. If that destination already holds a
 ///    copy from a previous run, the user is asked before copying again; pass
 ///    `--recopy` to bypass the prompt or `--yes` to answer yes.
+/// 3. **Cleanup** — when `--allowed-types` is given, copied files whose
+///    extension is not allowed for their document type are moved into
+///    `<destination>/trash/`, and the CSV is updated with their final paths.
 ///
 /// See `tool/README.md` for the full flag reference and the destination layout.
 Future<void> main(List<String> arguments) async {
@@ -219,6 +227,40 @@ Future<void> main(List<String> arguments) async {
     // Rewrite the same CSV now that every copy destination is known.
     await service.writeCsv(options.csvPath, files, copiedTo: copiedTo);
 
+    _printCopySummary(copyResult, options.copyMode!);
+    stdout.writeln('CSV updated with copy destinations: ${options.csvPath}');
+
+    if (options.allowedExtensions.isNotEmpty) {
+      final trashResult = await service.moveDisallowedFiles(
+        files: files,
+        copiedToBySource: copyResult.copiedToBySource,
+        allowedExtensionsByDocumentType: options.allowedExtensions,
+        destinationRoot: destination,
+      );
+
+      if (trashResult.movedTo.isNotEmpty) {
+        copiedTo.addAll(trashResult.movedTo);
+        await service.writeCsv(options.csvPath, files, copiedTo: copiedTo);
+      }
+
+      stdout.writeln(
+        'Trash cleanup (${_describeRules(options.allowedExtensions)}): '
+        '${trashResult.totalMoved} file(s) moved to ${trashResult.trashRoot}.',
+      );
+
+      if (trashResult.movedTo.isNotEmpty) {
+        stdout.writeln(
+          'CSV updated with trash destinations for '
+          '${trashResult.totalMoved} file(s).',
+        );
+      }
+
+      for (final warning in trashResult.warnings) {
+        log.w(warning);
+        stderr.writeln('Warning: $warning');
+      }
+    }
+
     if (copyResult.copiedToBySource.isNotEmpty) {
       await _CopyState(
         mode: options.copyMode!.name,
@@ -238,9 +280,6 @@ Future<void> main(List<String> arguments) async {
       'warning(s); CSV updated with ${copyResult.copiedToBySource.length} '
       'destination(s).',
     );
-
-    _printCopySummary(copyResult, options.copyMode!);
-    stdout.writeln('CSV updated with copy destinations: ${options.csvPath}');
 
     for (final warning in copyResult.warnings) {
       log.w(warning);
@@ -271,6 +310,7 @@ class _Options {
   final _CopyMode? copyMode;
   final String? copyDestination;
   final bool overwrite;
+  final Map<String, Set<String>> allowedExtensions;
   final bool reindex;
   final bool reuseIndex;
   final bool recopy;
@@ -283,6 +323,7 @@ class _Options {
     required this.copyMode,
     required this.copyDestination,
     required this.overwrite,
+    required this.allowedExtensions,
     required this.reindex,
     required this.reuseIndex,
     required this.recopy,
@@ -292,6 +333,7 @@ class _Options {
   static _Options? parse(List<String> arguments) {
     final positional = <String>[];
     final unknown = <String>[];
+    final allowedExtensions = <String, Set<String>>{};
     String? csvPath;
     String? byCodeDestination;
     String? duplicateDestination;
@@ -301,6 +343,21 @@ class _Options {
     var reuseIndex = false;
     var recopy = false;
     var assumeYes = false;
+
+    bool addAllowedExtensions(String specification) {
+      try {
+        final parsed = FileIndexService.parseAllowedExtensions(specification);
+        for (final entry in parsed.entries) {
+          allowedExtensions
+              .putIfAbsent(entry.key, () => <String>{})
+              .addAll(entry.value);
+        }
+        return true;
+      } on FormatException catch (error) {
+        _usageError('Invalid --allowed-types value: ${error.message}');
+        return false;
+      }
+    }
 
     for (var i = 0; i < arguments.length; i++) {
       final argument = arguments[i].trim();
@@ -343,6 +400,7 @@ class _Options {
         '--csv': 'csv',
         '--copy-by-code': 'byCode',
         '--copy-duplicates': 'duplicates',
+        '--allowed-types': 'allowed',
       };
       if (valueFlags.containsKey(argument)) {
         if (i + 1 >= arguments.length) {
@@ -357,6 +415,8 @@ class _Options {
             byCodeDestination = value;
           case 'duplicates':
             duplicateDestination = value;
+          case 'allowed':
+            if (!addAllowedExtensions(value)) return null;
         }
         continue;
       }
@@ -373,6 +433,14 @@ class _Options {
         duplicateDestination = argument
             .substring('--copy-duplicates='.length)
             .trim();
+        continue;
+      }
+      if (argument.startsWith('--allowed-types=')) {
+        if (!addAllowedExtensions(
+          argument.substring('--allowed-types='.length).trim(),
+        )) {
+          return null;
+        }
         continue;
       }
       if (argument.startsWith('--')) {
@@ -411,6 +479,12 @@ class _Options {
       _usageError('The copy destination must not be empty.');
       return null;
     }
+    if (allowedExtensions.isNotEmpty && copyMode == null) {
+      _usageError(
+        '--allowed-types requires --copy-by-code or --copy-duplicates.',
+      );
+      return null;
+    }
     if (csvPath != null && csvPath.isEmpty) {
       _usageError('The --csv path must not be empty.');
       return null;
@@ -436,6 +510,7 @@ class _Options {
       copyMode: copyMode,
       copyDestination: copyDestination,
       overwrite: overwrite,
+      allowedExtensions: allowedExtensions,
       reindex: reindex,
       reuseIndex: reuseIndex,
       recopy: recopy,
@@ -621,6 +696,25 @@ String _formatTimestamp(DateTime time) {
   String two(int value) => value.toString().padLeft(2, '0');
   return '${local.year}-${two(local.month)}-${two(local.day)} '
       '${two(local.hour)}:${two(local.minute)}';
+}
+
+String _describeRules(Map<String, Set<String>> rules) {
+  final entries = rules.entries.toList()
+    ..sort((a, b) => a.key.compareTo(b.key));
+
+  return entries
+      .map((entry) {
+        final extensions = entry.value.toList()..sort();
+        final display = extensions.isEmpty
+            ? '(none)'
+            : extensions
+                  .map((extension) {
+                    return extension == '*' ? '*' : '.$extension';
+                  })
+                  .join(', ');
+        return '${entry.key}: $display';
+      })
+      .join('; ');
 }
 
 void _printCopySummary(DuplicateCopyResult result, _CopyMode mode) {

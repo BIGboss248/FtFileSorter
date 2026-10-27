@@ -15,13 +15,16 @@ dart run tool/index_folder.dart <folder> [output.csv] [options]
 
 ## index_folder.dart
 
-The tool runs in two phases:
+The tool runs in three phases:
 
 1. **Index** — scans `<folder>`, extracts the document code and document type
    from every file name, and writes a CSV.
 2. **Copy** (optional) — when `--copy-by-code` or `--copy-duplicates` is given,
    copies the files into the chosen destination and rewrites the same CSV with a
    `Copied To` column showing where each file was copied.
+3. **Cleanup** (optional) — when `--allowed-types` is given, copied files whose
+   extension is not allowed for their document type are moved into
+   `<destination>/trash/`, and the CSV is updated with their final paths.
 
 ### Arguments
 
@@ -39,6 +42,7 @@ The tool runs in two phases:
 | `--copy-by-code=<destination>` | Copy **every** indexed file into `<destination>`, sorted by document code (see below). |
 | `--copy-duplicates=<destination>` | Legacy mode: copy only files whose code is shared with at least one other file, into `<destination>/<code>/`. |
 | `--overwrite-duplicates` | Replace files that already exist in the destination. Applies to both copy modes. |
+| `--allowed-types=<rules>` | Clean the copy: keep only the listed extensions per document type and move the rest into `<destination>/trash/`. See [Trash cleanup](#trash-cleanup---allowed-types). Repeatable. |
 | `--reindex` | Index again even when a CSV already exists. |
 | `--reuse-index` | Reuse an existing CSV without asking. |
 | `--recopy` | Copy again even when the destination already has a copy. |
@@ -76,7 +80,8 @@ The parent folder is created when it does not exist.
 ### The `Copied To` column
 
 The CSV ends with a `Copied To` column. After a copy run, each row shows the
-destination path of that file:
+final path of that file — the copy folder, or `<destination>/trash/...` when the
+cleanup step moved it:
 
 ```text
 Index,File Name,...,Full Path,Size (Bytes),Modified,Copied To
@@ -91,12 +96,15 @@ Index,File Name,...,Full Path,Size (Bytes),Modified,Copied To
 - Files that were already present in the destination with the same size are
   recorded too, because the tool knows where they live.
 - A failed copy leaves the column empty and prints a warning.
+- When `--allowed-types` moves a file to the trash, the column is updated to its
+  final path inside `<destination>/trash/`.
 - Re-indexing preserves destinations from the previous CSV for files that still
   exist. A completely new CSV starts with an empty column.
 
-Because the copy step runs after indexing, the CSV is written twice in a copy
-run: once right after the index (so the index exists even if copying fails) and
-again at the end with the destinations filled in.
+Because the copy step runs after indexing, the CSV is written two or three
+times in a copy run: once right after the index (so the index exists even if
+copying fails), again with the copy destinations, and once more when the cleanup
+step moves files to the trash.
 
 ### How files are sorted (`--copy-by-code`)
 
@@ -147,6 +155,70 @@ names without a complete code.
 - Use a destination outside the indexed folder, otherwise the copies will be
   picked up by the next index run.
 
+### Trash cleanup (`--allowed-types`)
+
+Some document types only need certain file formats (for example drawings that
+should keep DWG and PDF, but not DXF). Pass a rule string to keep only the wanted
+extensions after copying:
+
+```bat
+dart run tool/index_folder.dart "D:\Documents\AS BUILT" --copy-by-code "D:\Sorted AS BUILT" --allowed-types="JC=dwg,pdf;JA=pdf"
+```
+
+Format:
+
+```text
+DOCTYPE=ext1,ext2;DOCTYPE2=ext3
+```
+
+- `DOCTYPE` is the two-letter document type (characters 12–13 of the file name).
+- Extensions are case-insensitive; the leading dot is optional (`pdf` and `.PDF`
+  are the same).
+- An empty list (`JC=`) allows nothing, so every copied file of that type is
+  trashed.
+- `*` allows every extension for that type (`JC=*`), which disables cleanup for
+  it.
+- Document types that are **not** listed are left completely untouched.
+- Repeat the flag to add more rules; extensions for the same type are merged.
+
+Only files copied into the destination are considered. Source files are never
+moved, and unrelated files that already existed in the destination are ignored.
+
+Cleanup runs as part of a copy. If the copy step is skipped (for example because
+a previous copy exists and the prompt is declined), cleanup is skipped too; use
+`--recopy` to apply new rules to an existing destination.
+
+Disallowed files are moved into `<destination>/trash/`. The trash mirrors the
+copy layout, so `D:\Sorted\DNSSGM12000JCSS700\file.dwg` becomes
+`D:\Sorted\trash\DNSSGM12000JCSS700\file.dwg`. This keeps same-named files from
+different code folders apart and shows where each file came from.
+
+Behaviour on repeated runs:
+
+- If the trash already holds an identical file (same size), the fresh copy in
+  the destination is deleted and the existing trash path is recorded. No
+  duplicates pile up in the trash.
+- If the file changed, the trash copy is replaced with the new version.
+- The `trash` folder is only created when at least one file has to move.
+- The trash is one-way: changing `--allowed-types` later does not restore files
+  that were already moved. Move them back manually if a rule was wrong.
+- The final CSV write updates `Copied To` to the trash path for moved files.
+- Trash warnings are reported but do not make the run fail.
+
+Example result for `--allowed-types="JC=pdf;JA=dwg"`:
+
+```text
+D:\Sorted/
+├─ DNSSGM12000JCSS700/
+│  └─ DNSSGM12000JCSS70001-0001.pdf        <- kept (PDF is allowed for JC)
+├─ no_code/
+│  └─ T2404.pdf                           <- no document type rule, untouched
+└─ trash/
+   ├─ DNSSGH13900JACD00100-0001.dxf        <- JA only allows DWG
+   └─ DNSSGM12000JCSS700/
+      └─ DNSSGM12000JCSS70001-0001.dwg     <- DWG is not allowed for JC
+```
+
 ### Preventing repeated work (prompts)
 
 The tool remembers what it already did and asks before doing it again.
@@ -188,7 +260,8 @@ copy. Pass `--reindex`, `--recopy`, or `--yes` to opt in explicitly.
 
 For reference, characters 12 and 13 of the file name form the two-letter
 document type (for example `JC` in `DNSSGM12000JCSS70001-0001.dwg`). It is
-written to the CSV but does not affect the copy layout.
+written to the CSV, does not affect the copy layout, and drives the
+`--allowed-types` cleanup.
 
 ### Examples
 
@@ -202,8 +275,14 @@ dart run tool/index_folder.dart "D:\Documents\AS BUILT" "D:\exports\index.csv" -
 :: Sort every file by document code, record destinations in the CSV
 dart run tool/index_folder.dart "D:\Documents\AS BUILT" --csv "D:\exports\index.csv" --copy-by-code "D:\Sorted AS BUILT"
 
+:: Sort, then trash extensions that are not wanted per document type
+dart run tool/index_folder.dart "D:\Documents\AS BUILT" --csv "D:\exports\index.csv" --copy-by-code "D:\Sorted AS BUILT" --allowed-types "JC=dwg,pdf;JA=pdf"
+
+:: Multiple rules with explicit dots and wildcards
+dart run tool/index_folder.dart "D:\Documents\AS BUILT" --copy-by-code "D:\Sorted AS BUILT" --allowed-types="JC=dwg,.PDF;JA=*;CA="
+
 :: First run in a scheduled task: index and copy without prompts
-dart run tool/index_folder.dart "D:\Documents\AS BUILT" --csv "D:\exports\index.csv" --copy-by-code "D:\Sorted AS BUILT" --yes
+dart run tool/index_folder.dart "D:\Documents\AS BUILT" --csv "D:\exports\index.csv" --copy-by-code "D:\Sorted AS BUILT" --allowed-types="JC=dwg,pdf;JA=pdf" --yes
 
 :: Force a fresh index and a fresh copy, replacing existing files
 dart run tool/index_folder.dart "D:\Documents\AS BUILT" --csv "D:\exports\index.csv" --copy-by-code "D:\Sorted AS BUILT" --reindex --recopy --overwrite-duplicates
@@ -225,5 +304,5 @@ dart run tool/index_folder.dart "D:\Documents\AS BUILT" --copy-duplicates "D:\Du
 - The **File Indexer** screen uses the same indexing service and offers the
   duplicate-only copy mode through its "Copy duplicate document codes" switch.
   Its CSV export also includes the `Copied To` column when a copy was run in the
-  same session. The sort-everything mode is CLI-only.
+  same session. The sort-everything mode and trash cleanup are CLI-only.
 - Debug logging is printed to the console for every indexed and copied file.

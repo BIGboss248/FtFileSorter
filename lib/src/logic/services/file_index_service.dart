@@ -157,6 +157,34 @@ class CsvIndexData {
   int get totalFiles => files.length;
 }
 
+/// Outcome of moving copied files that are not allowed for their document type.
+class TrashResult {
+  /// Destination root that was cleaned up.
+  final String destinationRoot;
+
+  /// Folder that received the undesired files: `<destinationRoot>/trash`.
+  final String trashRoot;
+
+  /// Source full path -> final path inside the trash folder.
+  final Map<String, String> movedTo;
+
+  /// Files that could not be moved.
+  final List<String> warnings;
+
+  const TrashResult({
+    required this.destinationRoot,
+    required this.trashRoot,
+    this.movedTo = const {},
+    this.warnings = const [],
+  });
+
+  /// Number of files that ended up in the trash folder.
+  int get totalMoved => movedTo.length;
+
+  /// Whether any file could not be moved.
+  bool get hasWarnings => warnings.isNotEmpty;
+}
+
 /// Recursively indexes every file below a folder and exports the result as CSV.
 ///
 /// The service is deliberately free of Flutter imports so it can also be driven
@@ -872,6 +900,166 @@ class FileIndexService {
       copiedToBySource: copiedTo,
       warnings: warnings,
     );
+  }
+
+  /// Moves copied files into `<destinationRoot>/trash/` when their extension is
+  /// not allowed for their document type.
+  ///
+  /// [copiedToBySource] maps each source full path to the path it was copied to;
+  /// only those destination files are considered, so unrelated files in the
+  /// destination are never touched. Document types absent from
+  /// [allowedExtensionsByDocumentType] are left alone, and an allowed set
+  /// containing `*` keeps every extension for that type.
+  ///
+  /// The trash folder mirrors the relative layout of the copy destination
+  /// (for example `trash/<document code>/<file>`), which keeps same-named files
+  /// from different code folders apart. Re-running the cleanup is idempotent:
+  /// when the trash already holds an identical file, the fresh destination copy
+  /// is removed and the existing trash path is reported.
+  Future<TrashResult> moveDisallowedFiles({
+    required List<IndexedFile> files,
+    required Map<String, String> copiedToBySource,
+    required Map<String, Set<String>> allowedExtensionsByDocumentType,
+    required String destinationRoot,
+  }) async {
+    final destination = p.normalize(p.absolute(destinationRoot));
+    final trashRoot = p.join(destination, 'trash');
+    final filesBySource = {for (final file in files) file.fullPath: file};
+
+    final movedTo = <String, String>{};
+    final warnings = <String>[];
+
+    _log.i(
+      'Trash cleanup requested: ${copiedToBySource.length} copied file(s), '
+      '${allowedExtensionsByDocumentType.length} document type rule(s), '
+      'trash "$trashRoot".',
+    );
+
+    for (final entry in copiedToBySource.entries) {
+      final file = filesBySource[entry.key];
+      if (file == null) continue;
+
+      final documentType = file.documentTypeCode.toUpperCase();
+      if (documentType.isEmpty) continue;
+
+      final allowed = allowedExtensionsByDocumentType[documentType];
+      if (allowed == null || allowed.contains('*')) continue;
+
+      final extension = file.extension.startsWith('.')
+          ? file.extension.substring(1).toLowerCase()
+          : file.extension.toLowerCase();
+      if (allowed.contains(extension)) continue;
+
+      final currentPath = entry.value;
+      final relative = p.relative(currentPath, from: destination);
+      final trashPrefix = 'trash${p.separator}';
+
+      if (relative == 'trash' || relative.startsWith(trashPrefix)) {
+        _log.t('Skipping file already in trash: "$currentPath".');
+        movedTo[entry.key] = currentPath;
+        continue;
+      }
+      if (p.isAbsolute(relative) || relative.startsWith('..')) {
+        warnings.add(
+          'Could not move "$currentPath" to trash: it is outside '
+          '"$destination".',
+        );
+        continue;
+      }
+
+      final targetPath = p.join(trashRoot, relative);
+      final source = File(currentPath);
+      final target = File(targetPath);
+
+      if (!await source.exists()) {
+        _log.w('Cannot move missing copied file to trash: "$currentPath".');
+        warnings.add(
+          'Could not move "$currentPath" to trash: the file no longer exists.',
+        );
+        continue;
+      }
+
+      try {
+        await target.parent.create(recursive: true);
+
+        if (await target.exists() &&
+            await target.length() == await source.length()) {
+          // Already trashed in an earlier run; drop the fresh copy.
+          await source.delete();
+          movedTo[entry.key] = targetPath;
+          _log.t('Already in trash: "$targetPath".');
+          continue;
+        }
+
+        await source.copy(targetPath);
+        await source.delete();
+        movedTo[entry.key] = targetPath;
+        _log.t('Moved to trash: "$currentPath" -> "$targetPath".');
+      } on FileSystemException catch (error) {
+        _log.w('Could not move file to trash: "$currentPath"', error: error);
+        warnings.add(
+          'Could not move "$currentPath" to trash: ${error.message}',
+        );
+      }
+    }
+
+    _log.i(
+      'Trash cleanup finished: ${movedTo.length} file(s) moved, '
+      '${warnings.length} warning(s).',
+    );
+
+    return TrashResult(
+      destinationRoot: destination,
+      trashRoot: trashRoot,
+      movedTo: movedTo,
+      warnings: warnings,
+    );
+  }
+
+  /// Parses a document-type rule string such as `JC=dwg,pdf;JA=pdf`.
+  ///
+  /// Format: `DOCTYPE=ext1,ext2;DOCTYPE2=ext3`. Extensions are matched
+  /// case-insensitively and may be written with or without a leading dot. An
+  /// empty extension list (`JC=`) allows nothing, and `*` allows everything.
+  /// Throws a [FormatException] for malformed entries.
+  static Map<String, Set<String>> parseAllowedExtensions(String specification) {
+    final result = <String, Set<String>>{};
+
+    for (final rawEntry in specification.split(';')) {
+      final entry = rawEntry.trim();
+      if (entry.isEmpty) continue;
+
+      final separator = entry.indexOf('=');
+      if (separator <= 0) {
+        throw FormatException('Expected DOCTYPE=ext1,ext2 in "$entry".');
+      }
+
+      final documentType = entry.substring(0, separator).trim().toUpperCase();
+      if (documentType.isEmpty) {
+        throw FormatException('Missing document type in "$entry".');
+      }
+
+      final extensions = result.putIfAbsent(documentType, () => <String>{});
+
+      final rawExtensions = entry.substring(separator + 1);
+      for (final rawExtension in rawExtensions.split(',')) {
+        var extension = rawExtension.trim().toLowerCase();
+        if (extension.isEmpty) continue;
+        if (extension != '*') {
+          while (extension.startsWith('.')) {
+            extension = extension.substring(1);
+          }
+          if (extension.isEmpty) continue;
+        }
+        extensions.add(extension);
+      }
+    }
+
+    if (result.isEmpty) {
+      throw const FormatException('No document types were provided.');
+    }
+
+    return result;
   }
 
   /// Copies [file] into [targetDirectory], recording skips and failures.

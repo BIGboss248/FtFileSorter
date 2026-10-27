@@ -553,6 +553,195 @@ void main() {
     });
   });
 
+  group('Trash cleanup', () {
+    const service = FileIndexService();
+    const sharedCode = 'DNSSGM12000JCSS700';
+
+    late Directory tempDir;
+
+    setUp(() async {
+      tempDir = await Directory.systemTemp.createTemp('ft_trash_');
+    });
+
+    tearDown(() async {
+      if (await tempDir.exists()) {
+        await tempDir.delete(recursive: true);
+      }
+    });
+
+    Future<({List<IndexedFile> files, String destination})> prepare() async {
+      await File(
+        p.join(tempDir.path, 'DNSSGM12000JCSS70001-0001.dwg'),
+      ).writeAsString('dwg');
+      await File(
+        p.join(tempDir.path, 'DNSSGM12000JCSS70001-0001.pdf'),
+      ).writeAsString('pdf');
+      await File(
+        p.join(tempDir.path, 'DNSSGH13900JACD00100-0001.dxf'),
+      ).writeAsString('dxf');
+      await File(p.join(tempDir.path, 'T2404.pdf')).writeAsString('short');
+
+      final indexed = await service.indexDirectory(tempDir.path);
+      return (
+        files: indexed.files,
+        destination: p.join(tempDir.path, 'sorted'),
+      );
+    }
+
+    String sourceOf(List<IndexedFile> files, String fileName) =>
+        files.firstWhere((file) => file.fileName == fileName).fullPath;
+
+    test('moves disallowed extensions and keeps allowed ones', () async {
+      final prepared = await prepare();
+      final copy = await service.copyFilesByCode(
+        prepared.files,
+        destinationRoot: prepared.destination,
+      );
+
+      final trash = await service.moveDisallowedFiles(
+        files: prepared.files,
+        copiedToBySource: copy.copiedToBySource,
+        allowedExtensionsByDocumentType: {
+          'JC': {'pdf'},
+          'JA': {'dwg'},
+        },
+        destinationRoot: prepared.destination,
+      );
+
+      expect(trash.totalMoved, equals(2));
+      expect(trash.warnings, isEmpty);
+
+      final dwgSource = sourceOf(
+        prepared.files,
+        'DNSSGM12000JCSS70001-0001.dwg',
+      );
+      final pdfSource = sourceOf(
+        prepared.files,
+        'DNSSGM12000JCSS70001-0001.pdf',
+      );
+      final dxfSource = sourceOf(
+        prepared.files,
+        'DNSSGH13900JACD00100-0001.dxf',
+      );
+      final noCodeSource = sourceOf(prepared.files, 'T2404.pdf');
+
+      final dwgTrashPath = p.join(
+        prepared.destination,
+        'trash',
+        sharedCode,
+        'DNSSGM12000JCSS70001-0001.dwg',
+      );
+      expect(trash.movedTo[dwgSource], equals(dwgTrashPath));
+      expect(File(dwgTrashPath).existsSync(), isTrue);
+      expect(File(copy.copiedToBySource[dwgSource]!).existsSync(), isFalse);
+
+      // Allowed extension stays in its code folder.
+      expect(trash.movedTo.containsKey(pdfSource), isFalse);
+      expect(File(copy.copiedToBySource[pdfSource]!).existsSync(), isTrue);
+
+      // A unique code is a loose file; it mirrors into trash without a folder.
+      final dxfTrashPath = p.join(
+        prepared.destination,
+        'trash',
+        'DNSSGH13900JACD00100-0001.dxf',
+      );
+      expect(trash.movedTo[dxfSource], equals(dxfTrashPath));
+      expect(File(dxfTrashPath).existsSync(), isTrue);
+
+      // Document types without a rule are not touched.
+      expect(trash.movedTo.containsKey(noCodeSource), isFalse);
+      expect(File(copy.copiedToBySource[noCodeSource]!).existsSync(), isTrue);
+    });
+
+    test('keeps every extension when the rule is a wildcard', () async {
+      final prepared = await prepare();
+      final copy = await service.copyFilesByCode(
+        prepared.files,
+        destinationRoot: prepared.destination,
+      );
+
+      final trash = await service.moveDisallowedFiles(
+        files: prepared.files,
+        copiedToBySource: copy.copiedToBySource,
+        allowedExtensionsByDocumentType: {
+          'JC': {'*'},
+          'JA': {'*'},
+        },
+        destinationRoot: prepared.destination,
+      );
+
+      expect(trash.totalMoved, isZero);
+      expect(
+        Directory(p.join(prepared.destination, 'trash')).existsSync(),
+        isFalse,
+      );
+    });
+
+    test('re-trashing keeps a single copy in the trash folder', () async {
+      final prepared = await prepare();
+      final rules = {
+        'JC': {'pdf'},
+      };
+
+      final firstCopy = await service.copyFilesByCode(
+        prepared.files,
+        destinationRoot: prepared.destination,
+      );
+      final firstTrash = await service.moveDisallowedFiles(
+        files: prepared.files,
+        copiedToBySource: firstCopy.copiedToBySource,
+        allowedExtensionsByDocumentType: rules,
+        destinationRoot: prepared.destination,
+      );
+
+      final dwgSource = sourceOf(
+        prepared.files,
+        'DNSSGM12000JCSS70001-0001.dwg',
+      );
+      final trashPath = firstTrash.movedTo[dwgSource]!;
+      expect(File(trashPath).existsSync(), isTrue);
+
+      final secondCopy = await service.copyFilesByCode(
+        prepared.files,
+        destinationRoot: prepared.destination,
+      );
+      final secondTrash = await service.moveDisallowedFiles(
+        files: prepared.files,
+        copiedToBySource: secondCopy.copiedToBySource,
+        allowedExtensionsByDocumentType: rules,
+        destinationRoot: prepared.destination,
+      );
+
+      expect(secondTrash.movedTo[dwgSource], equals(trashPath));
+      expect(Directory(p.dirname(trashPath)).listSync(), hasLength(1));
+      expect(
+        File(secondCopy.copiedToBySource[dwgSource]!).existsSync(),
+        isFalse,
+      );
+    });
+
+    test('parses document type rules', () {
+      final rules = FileIndexService.parseAllowedExtensions(
+        'JC=dwg,.PDF; ja=*;CA=',
+      );
+
+      expect(rules['JC'], equals({'dwg', 'pdf'}));
+      expect(rules['JA'], equals({'*'}));
+      expect(rules['CA'], isEmpty);
+    });
+
+    test('rejects malformed document type rules', () {
+      expect(
+        () => FileIndexService.parseAllowedExtensions('JC'),
+        throwsFormatException,
+      );
+      expect(
+        () => FileIndexService.parseAllowedExtensions('   '),
+        throwsFormatException,
+      );
+    });
+  });
+
   group('CSV export', () {
     const service = FileIndexService();
 
