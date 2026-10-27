@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../../../core/theme/widgets/animated_theme_toggle.dart';
 import '../../data/models/excel_file_metadata.dart';
 import '../../logic/services/excel_metadata_service.dart';
+import '../navigation/app_navigation_drawer.dart';
 
 /// Screen for selecting an Excel data file, parsing its metadata,
 /// and selecting the target column that holds the document code
@@ -160,6 +161,7 @@ class _ExcelAnalyzerScreenState extends State<ExcelAnalyzerScreen> {
     final colorScheme = theme.colorScheme;
 
     return Scaffold(
+      drawer: const AppNavigationDrawer(),
       appBar: AppBar(
         title: const Text('Excel Metadata & Document Code Analysis'),
         actions: const [

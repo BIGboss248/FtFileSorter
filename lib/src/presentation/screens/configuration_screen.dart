@@ -3,11 +3,11 @@ import 'package:flutter/material.dart';
 import '../../../core/theme/widgets/animated_theme_toggle.dart';
 import '../../data/models/code_segment.dart';
 import '../../logic/services/filename_parser_service.dart';
+import '../navigation/app_destination.dart';
+import '../navigation/app_navigation_drawer.dart';
 import '../widgets/schema_preview_container.dart';
 import '../widgets/segment_card.dart';
 import '../widgets/test_parser_section.dart';
-import 'document_analyzer_screen.dart';
-import 'excel_analyzer_screen.dart';
 import 'file_indexer_screen.dart';
 
 /// Production-ready configuration screen for desktop file sorting and filename schema configuration.
@@ -178,38 +178,31 @@ class _ConfigurationScreenState extends State<ConfigurationScreen> {
     });
   }
 
+  /// Switches the app shell to the File Indexer screen. Falls back to pushing
+  /// the screen when this screen is rendered outside of the shell.
+  void _openFileIndexer() {
+    final shell = AppShellScope.maybeOf(context);
+    if (shell != null) {
+      shell.onDestinationSelected(AppDestination.fileIndexer);
+      return;
+    }
+
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const FileIndexerScreen()),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
     return Scaffold(
+      drawer: const AppNavigationDrawer(),
       appBar: AppBar(
         title: const Text('Desktop Sorter & Filename Parser Configuration'),
         centerTitle: false,
         actions: [
-          FilledButton.tonalIcon(
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const ExcelAnalyzerScreen()),
-              );
-            },
-            icon: const Icon(Icons.table_chart_outlined, size: 18),
-            label: const Text('Excel Analyzer'),
-          ),
-          const SizedBox(width: 8),
-          FilledButton.tonalIcon(
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => const DocumentAnalyzerScreen(),
-                ),
-              );
-            },
-            icon: const Icon(Icons.analytics_outlined, size: 18),
-            label: const Text('Document Code Analyzer'),
-          ),
-          const SizedBox(width: 8),
           IconButton(
             tooltip: 'Reset to Default Schema',
             icon: const Icon(Icons.restore),
@@ -280,13 +273,7 @@ class _ConfigurationScreenState extends State<ConfigurationScreen> {
                       ),
                     ),
                     trailing: FilledButton.icon(
-                      onPressed: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => const FileIndexerScreen(),
-                          ),
-                        );
-                      },
+                      onPressed: _openFileIndexer,
                       icon: const Icon(Icons.table_rows_outlined, size: 18),
                       label: const Text('Open File Indexer'),
                       style: FilledButton.styleFrom(

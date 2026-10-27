@@ -1,7 +1,7 @@
 import 'package:adaptive_theme/adaptive_theme.dart';
 import 'package:flutter/material.dart';
 import 'core/theme/app_theme.dart';
-import 'src/presentation/screens/configuration_screen.dart';
+import 'src/presentation/screens/app_shell.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -23,7 +23,7 @@ class MyApp extends StatelessWidget {
         title: 'Ft File Sorter',
         theme: theme,
         darkTheme: darkTheme,
-        home: const ConfigurationScreen(),
+        home: const AppShell(),
       ),
     );
   }

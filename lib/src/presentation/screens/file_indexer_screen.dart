@@ -6,6 +6,7 @@ import '../../../core/theme/widgets/animated_theme_toggle.dart';
 import '../../data/models/document_type_info.dart';
 import '../../data/models/indexed_file.dart';
 import '../../logic/services/file_index_service.dart';
+import '../navigation/app_navigation_drawer.dart';
 
 /// Screen that scans a folder tree and renders every discovered file together
 /// with its 18-character document code and 2-character document type
@@ -324,6 +325,7 @@ class _FileIndexerScreenState extends State<FileIndexerScreen> {
     final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
+      drawer: const AppNavigationDrawer(),
       appBar: AppBar(
         title: const Text('File Indexer & CSV Export'),
         actions: const [AnimatedThemeToggle(), SizedBox(width: 12)],

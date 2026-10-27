@@ -2,7 +2,8 @@ import 'package:adaptive_theme/adaptive_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ft_file_sorter/core/theme/app_theme.dart';
-import 'package:ft_file_sorter/src/presentation/screens/configuration_screen.dart';
+import 'package:ft_file_sorter/src/presentation/navigation/app_destination.dart';
+import 'package:ft_file_sorter/src/presentation/screens/app_shell.dart';
 import 'package:ft_file_sorter/src/presentation/screens/document_analyzer_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shared_preferences_platform_interface/in_memory_shared_preferences_async.dart';
@@ -106,18 +107,28 @@ void main() {
       expect(find.text('.doc'), findsWidgets);
     });
 
-    testWidgets('navigates from ConfigurationScreen to DocumentAnalyzerScreen', (WidgetTester tester) async {
+    testWidgets('navigates from the drawer to DocumentAnalyzerScreen', (WidgetTester tester) async {
       tester.view.physicalSize = const Size(1920, 1080);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
 
-      await tester.pumpWidget(buildTestableWidget(const ConfigurationScreen()));
+      await tester.pumpWidget(
+        buildTestableWidget(
+          const AppShell(initialDestination: AppDestination.configuration),
+        ),
+      );
       await tester.pumpAndSettle();
 
-      // Find and tap the navigation button in AppBar
-      final navButton = find.text('Document Code Analyzer');
-      expect(navButton, findsOneWidget);
-      await tester.tap(navButton);
+      // Open the hamburger menu and pick the document analyzer
+      await tester.tap(find.byTooltip('Open navigation menu'));
+      await tester.pumpAndSettle();
+
+      final navItem = find.descendant(
+        of: find.byType(NavigationDrawer),
+        matching: find.text(AppDestination.documentAnalyzer.title),
+      );
+      expect(navItem, findsOneWidget);
+      await tester.tap(navItem);
       await tester.pumpAndSettle();
 
       // Verify we are now on DocumentAnalyzerScreen

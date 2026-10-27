@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../../../core/theme/widgets/animated_theme_toggle.dart';
 import '../../data/models/document_code_analysis.dart';
 import '../../logic/services/document_code_parser_service.dart';
+import '../navigation/app_navigation_drawer.dart';
 
 /// Screen for inputting and analyzing an 18-character document code,
 /// identifying its document type (Characters 11 & 12), and specifying
@@ -115,6 +116,7 @@ class _DocumentAnalyzerScreenState extends State<DocumentAnalyzerScreen> {
     final colorScheme = theme.colorScheme;
 
     return Scaffold(
+      drawer: const AppNavigationDrawer(),
       appBar: AppBar(
         title: const Text('Document Code Analyzer (18-Char)'),
         actions: [

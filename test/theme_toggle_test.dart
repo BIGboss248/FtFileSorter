@@ -16,6 +16,10 @@ void main() {
 
   testWidgets('AnimatedThemeToggle switches theme between light and dark',
       (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(1920, 1080);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+
     await tester.pumpWidget(const MyApp(savedThemeMode: AdaptiveThemeMode.light));
     await tester.pumpAndSettle();
 
