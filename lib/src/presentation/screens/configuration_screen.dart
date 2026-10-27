@@ -8,6 +8,7 @@ import '../widgets/segment_card.dart';
 import '../widgets/test_parser_section.dart';
 import 'document_analyzer_screen.dart';
 import 'excel_analyzer_screen.dart';
+import 'file_indexer_screen.dart';
 
 /// Production-ready configuration screen for desktop file sorting and filename schema configuration.
 class ConfigurationScreen extends StatefulWidget {
@@ -190,9 +191,7 @@ class _ConfigurationScreenState extends State<ConfigurationScreen> {
           FilledButton.tonalIcon(
             onPressed: () {
               Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => const ExcelAnalyzerScreen(),
-                ),
+                MaterialPageRoute(builder: (_) => const ExcelAnalyzerScreen()),
               );
             },
             icon: const Icon(Icons.table_chart_outlined, size: 18),
@@ -244,6 +243,63 @@ class _ConfigurationScreenState extends State<ConfigurationScreen> {
             child: ListView(
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
               children: [
+                // 0. File Indexer shortcut
+                Card(
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    side: BorderSide(color: colorScheme.outlineVariant),
+                  ),
+                  child: ListTile(
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
+                    leading: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: colorScheme.primaryContainer,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Icon(
+                        Icons.folder_copy_outlined,
+                        color: colorScheme.onPrimaryContainer,
+                      ),
+                    ),
+                    title: Text(
+                      'File Indexer & CSV Export',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    subtitle: Text(
+                      'Scan a folder, extract the 18-character document code and '
+                      'the document type from characters 12-13, then export CSV.',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    trailing: FilledButton.icon(
+                      onPressed: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const FileIndexerScreen(),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.table_rows_outlined, size: 18),
+                      label: const Text('Open File Indexer'),
+                      style: FilledButton.styleFrom(
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 16),
+
                 // 1. Boolean Configuration Checkbox
                 Card(
                   elevation: 0,
@@ -422,7 +478,9 @@ class _ConfigurationScreenState extends State<ConfigurationScreen> {
                               height: 48,
                               child: FilledButton.icon(
                                 onPressed: _pickTargetFolder,
-                                icon: const Icon(Icons.drive_file_move_outlined),
+                                icon: const Icon(
+                                  Icons.drive_file_move_outlined,
+                                ),
                                 label: const Text('Browse Destination'),
                                 style: FilledButton.styleFrom(
                                   shape: RoundedRectangleBorder(
@@ -474,8 +532,11 @@ class _ConfigurationScreenState extends State<ConfigurationScreen> {
                                 controller: _excelFileController,
                                 decoration: InputDecoration(
                                   labelText: 'Metadata Excel / CSV File Path',
-                                  hintText: r'e.g. C:\Data\Metadata_Catalog.xlsx',
-                                  prefixIcon: const Icon(Icons.table_chart_outlined),
+                                  hintText:
+                                      r'e.g. C:\Data\Metadata_Catalog.xlsx',
+                                  prefixIcon: const Icon(
+                                    Icons.table_chart_outlined,
+                                  ),
                                   border: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(8),
                                   ),
