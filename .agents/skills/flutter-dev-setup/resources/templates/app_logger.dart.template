@@ -1,0 +1,96 @@
+// Copy to: lib/core/logging/app_logger.dart
+// Requires: flutter pub add logger
+//
+// Level policy
+//   development -> trace (everything, including per-item detail)
+//   release     -> info and above
+//   flutter test-> warning and above (keeps CI output readable)
+//
+// Web note: `dart:io` is unavailable on web. When the project targets web,
+// replace the environment checks with `kDebugMode` / `kReleaseMode` from
+// `package:flutter/foundation.dart` and drop the `dart:io` import.
+
+import 'dart:io';
+
+import 'package:logger/logger.dart';
+
+/// Whether the app was compiled ahead-of-time for release.
+const bool _isReleaseBuild = bool.fromEnvironment('dart.vm.product');
+
+/// `flutter test` sets this variable.
+final bool _isRunningTests = Platform.environment.containsKey('FLUTTER_TEST');
+
+/// Minimum level that is emitted.
+Level get appLogLevel {
+  if (_isRunningTests) return Level.warning;
+  if (_isReleaseBuild) return Level.info;
+  return Level.trace;
+}
+
+/// Creates a logger tagged with [name], e.g. `[MyService]`.
+///
+/// Override [level] or [output] in tests to capture records without touching
+/// the console:
+///
+/// ```dart
+/// final output = MemoryOutput();
+/// final log = createLogger('MyService', level: Level.trace, output: output);
+/// ```
+Logger createLogger(
+  String name, {
+  Level? level,
+  LogOutput? output,
+}) {
+  // ProductionFilter only checks the level. DevelopmentFilter additionally
+  // relies on asserts being enabled, which is false under `dart run`, so it
+  // would silently drop every message outside `flutter run` / `flutter test`.
+  return Logger(
+    filter: ProductionFilter(),
+    level: level ?? appLogLevel,
+    printer: _NamedPrinter(name),
+    output: output,
+  );
+}
+
+/// Compact output so logs stay readable next to `flutter run` output and in
+/// plain `dart run` CLIs.
+class _NamedPrinter extends LogPrinter {
+  _NamedPrinter(this.name);
+
+  final String name;
+
+  @override
+  List<String> log(LogEvent event) {
+    final buffer = StringBuffer()
+      ..write('[$name] ')
+      ..write(_label(event.level))
+      ..write(event.message);
+
+    if (event.error != null) {
+      buffer.write(' | error: ${event.error}');
+    }
+
+    final lines = <String>[buffer.toString()];
+
+    final stackTrace = event.stackTrace;
+    if (stackTrace != null) {
+      for (final line in stackTrace.toString().trim().split('\n').take(6)) {
+        lines.add('[$name]        $line');
+      }
+    }
+
+    return lines;
+  }
+
+  static String _label(Level level) {
+    return switch (level) {
+      Level.trace => 'TRACE   ',
+      Level.debug => 'DEBUG   ',
+      Level.info => 'INFO    ',
+      Level.warning => 'WARN    ',
+      Level.error => 'ERROR   ',
+      Level.fatal => 'FATAL   ',
+      _ => 'LOG     ',
+    };
+  }
+}
