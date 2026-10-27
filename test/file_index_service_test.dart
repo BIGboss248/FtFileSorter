@@ -380,6 +380,7 @@ void main() {
 
       expect(secondRun.totalCopied, isZero);
       expect(secondRun.totalSkipped, equals(2));
+      expect(secondRun.copiedToBySource, hasLength(2));
       expect(
         Directory(p.join(destination, sharedCode)).listSync(),
         hasLength(2),
@@ -530,6 +531,7 @@ void main() {
       );
       expect(secondRun.totalCopied, isZero);
       expect(secondRun.totalSkipped, equals(5));
+      expect(secondRun.copiedToBySource, hasLength(5));
 
       expect(
         Directory(
@@ -582,6 +584,62 @@ void main() {
 
       expect(lines[1], startsWith('1,'));
       expect(lines[2], startsWith('2,'));
+    });
+
+    test('records copy destinations and reads them back', () async {
+      final tempDir = await Directory.systemTemp.createTemp('ft_csv_round_');
+      addTearDown(() async {
+        if (await tempDir.exists()) {
+          await tempDir.delete(recursive: true);
+        }
+      });
+
+      const copiedTo = r'D:\Copied Codes\NAME,WITH,COMMAS\name,with,commas.dwg';
+      final csvPath = p.join(tempDir.path, 'index.csv');
+
+      await service.writeCsv(
+        csvPath,
+        [trickyFile],
+        copiedTo: {trickyFile.fullPath: copiedTo},
+      );
+
+      final data = await service.readCsv(csvPath);
+
+      expect(data.totalFiles, 1);
+      expect(data.copiedTo, {trickyFile.fullPath: copiedTo});
+
+      final roundTripped = data.files.single;
+      expect(roundTripped.fileName, equals(trickyFile.fileName));
+      expect(roundTripped.directoryPath, equals(trickyFile.directoryPath));
+      expect(roundTripped.fullPath, equals(trickyFile.fullPath));
+      expect(roundTripped.code, equals(trickyFile.code));
+      expect(
+        roundTripped.documentTypeCode,
+        equals(trickyFile.documentTypeCode),
+      );
+      expect(roundTripped.sizeInBytes, equals(trickyFile.sizeInBytes));
+    });
+
+    test('parses legacy CSVs without a Copied To column', () {
+      const legacy =
+          'Index,File Name,Extension,Document Type,Document Code,Directory,'
+          'Full Path,Size (Bytes),Modified\r\n'
+          '1,"file,one.pdf",.pdf,JC,CODE,"C:\\Docs","C:\\Docs\\file,one.pdf",'
+          '12,2026-01-01T00:00:00.000\r\n';
+
+      final data = FileIndexService.parseCsv(legacy);
+
+      expect(data.totalFiles, equals(1));
+      expect(data.files.single.fullPath, equals(r'C:\Docs\file,one.pdf'));
+      expect(data.files.single.sizeInBytes, equals(12));
+      expect(data.copiedTo, isEmpty);
+    });
+
+    test('rejects CSV text without a Full Path column', () {
+      expect(
+        () => FileIndexService.parseCsv('Index,File Name\r\n1,file.pdf\r\n'),
+        throwsFormatException,
+      );
     });
 
     test(

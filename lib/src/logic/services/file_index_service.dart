@@ -8,6 +8,12 @@ import '../../../core/logging/app_logger.dart';
 import '../../data/models/duplicate_code_group.dart';
 import '../../data/models/indexed_file.dart';
 
+/// Result of copying one file: its destination path and whether it was written.
+typedef _CopyOutcome = ({String? target, bool copied});
+
+/// Destination decision for one file: where it goes and whether to copy it.
+typedef _TargetDecision = ({String target, bool copy});
+
 /// Outcome of indexing a folder tree.
 class FileIndexResult {
   /// Folder that was scanned.
@@ -98,6 +104,12 @@ class DuplicateCopyResult {
   /// Files that were already present and identical, and therefore skipped.
   final List<String> skippedFiles;
 
+  /// Maps each source full path to the destination path that now holds it.
+  ///
+  /// Includes files that were already up to date, so the CSV can record where
+  /// every copied file lives. Files that were not part of the copy are absent.
+  final Map<String, String> copiedToBySource;
+
   /// Codes or files that could not be copied.
   final List<String> warnings;
 
@@ -108,6 +120,7 @@ class DuplicateCopyResult {
     this.looseFiles = const [],
     this.noCodeFiles = const [],
     this.skippedFiles = const [],
+    this.copiedToBySource = const {},
     this.warnings = const [],
   });
 
@@ -130,6 +143,20 @@ class DuplicateCopyResult {
   bool get hasWarnings => warnings.isNotEmpty;
 }
 
+/// Index rows read back from a CSV produced by the File Indexer.
+class CsvIndexData {
+  /// Indexed files in CSV row order.
+  final List<IndexedFile> files;
+
+  /// Source full path -> destination path recorded in the `Copied To` column.
+  final Map<String, String> copiedTo;
+
+  const CsvIndexData({required this.files, this.copiedTo = const {}});
+
+  /// Number of rows that were read.
+  int get totalFiles => files.length;
+}
+
 /// Recursively indexes every file below a folder and exports the result as CSV.
 ///
 /// The service is deliberately free of Flutter imports so it can also be driven
@@ -140,7 +167,8 @@ class FileIndexService {
   static final _log = createLogger('FileIndexService');
 
   /// Column order used by [buildCsv] and [writeCsv]. The first column is the
-  /// 1-based row number so exported indexes line up with the table.
+  /// 1-based row number so exported indexes line up with the table. The last
+  /// column records where the copy step placed the file, when it ran.
   static const List<String> csvHeaders = [
     'Index',
     'File Name',
@@ -151,7 +179,11 @@ class FileIndexService {
     'Full Path',
     'Size (Bytes)',
     'Modified',
+    'Copied To',
   ];
+
+  /// Name of the `Copied To` column inside [csvHeaders].
+  static const String copiedToHeader = 'Copied To';
 
   /// Folder names that are never descended into unless [includeHidden] is true.
   static const Set<String> _ignoredDirectoryNames = {
@@ -358,7 +390,13 @@ class FileIndexService {
   /// Serialises [files] to RFC 4180 CSV (CRLF line endings, quoted when
   /// needed) with a header row. The returned string has no byte-order mark;
   /// [writeCsv] adds one so Excel opens non-ASCII paths correctly.
-  String buildCsv(List<IndexedFile> files) {
+  ///
+  /// [copiedTo] maps a source full path to the destination recorded by a copy
+  /// run. Missing entries leave the `Copied To` column empty.
+  String buildCsv(
+    List<IndexedFile> files, {
+    Map<String, String> copiedTo = const {},
+  }) {
     _log.d('Building CSV for ${files.length} file(s).');
 
     final buffer = StringBuffer()
@@ -377,6 +415,7 @@ class FileIndexService {
         file.fullPath,
         file.sizeInBytes.toString(),
         file.lastModified?.toIso8601String() ?? '',
+        copiedTo[file.fullPath] ?? '',
       ];
       buffer
         ..write(row.map(escapeCsvValue).join(','))
@@ -386,7 +425,8 @@ class FileIndexService {
     }
 
     _log.d(
-      'CSV built: ${buffer.length} character(s) for ${files.length} row(s).',
+      'CSV built: ${buffer.length} character(s) for ${files.length} row(s), '
+      '${copiedTo.length} copy destination(s).',
     );
     return buffer.toString();
   }
@@ -397,10 +437,11 @@ class FileIndexService {
     String destinationPath,
     List<IndexedFile> files, {
     bool includeBom = true,
+    Map<String, String> copiedTo = const {},
   }) async {
     _log.i(
       'Writing CSV: path="$destinationPath", rows=${files.length}, '
-      'includeBom=$includeBom',
+      'includeBom=$includeBom, copiedTo=${copiedTo.length}',
     );
 
     final destination = File(destinationPath);
@@ -409,7 +450,7 @@ class FileIndexService {
       await destination.parent.create(recursive: true);
       _log.t('Ensured CSV parent directory exists: ${destination.parent.path}');
 
-      final content = buildCsv(files);
+      final content = buildCsv(files, copiedTo: copiedTo);
       await destination.writeAsString(
         includeBom ? '\uFEFF$content' : content,
         encoding: utf8,
@@ -431,6 +472,142 @@ class FileIndexService {
       );
       rethrow;
     }
+  }
+
+  /// Reads a CSV produced by [writeCsv].
+  ///
+  /// Legacy files without a `Copied To` column are accepted; their copy map is
+  /// simply empty. Throws a [FormatException] when the file is empty or lacks
+  /// the `Full Path` column.
+  Future<CsvIndexData> readCsv(String path) async {
+    _log.d('Reading CSV: "$path".');
+    final content = await File(path).readAsString(encoding: utf8);
+    final data = parseCsv(content);
+    _log.i(
+      'CSV read: "$path" (${data.totalFiles} row(s), '
+      '${data.copiedTo.length} copy destination(s)).',
+    );
+    return data;
+  }
+
+  /// Parses CSV [content] written by [buildCsv] into index rows.
+  static CsvIndexData parseCsv(String content) {
+    final normalized = content.startsWith('\uFEFF')
+        ? content.substring(1)
+        : content;
+    final rows = _parseCsvRows(normalized);
+    if (rows.isEmpty) {
+      throw const FormatException('CSV is empty.');
+    }
+
+    final headers = rows.first
+        .map((header) => header.trim().toLowerCase())
+        .toList(growable: false);
+
+    int indexOf(String header) => headers.indexOf(header.toLowerCase());
+
+    final fullPathIndex = indexOf('Full Path');
+    if (fullPathIndex < 0) {
+      throw const FormatException('CSV is missing the "Full Path" column.');
+    }
+
+    final nameIndex = indexOf('File Name');
+    final typeIndex = indexOf('Document Type');
+    final codeIndex = indexOf('Document Code');
+    final directoryIndex = indexOf('Directory');
+    final sizeIndex = indexOf('Size (Bytes)');
+    final modifiedIndex = indexOf('Modified');
+    final copiedIndex = indexOf(copiedToHeader);
+
+    String valueAt(List<String> row, int index) =>
+        index >= 0 && index < row.length ? row[index] : '';
+
+    final files = <IndexedFile>[];
+    final copiedTo = <String, String>{};
+
+    for (final row in rows.skip(1)) {
+      if (row.every((value) => value.trim().isEmpty)) continue;
+
+      final fullPath = valueAt(row, fullPathIndex).trim();
+      if (fullPath.isEmpty) continue;
+
+      final fileName = valueAt(row, nameIndex).trim();
+      final directory = valueAt(row, directoryIndex).trim();
+      final copied = valueAt(row, copiedIndex).trim();
+
+      files.add(
+        IndexedFile(
+          fileName: fileName.isEmpty ? p.basename(fullPath) : fileName,
+          directoryPath: directory.isEmpty ? p.dirname(fullPath) : directory,
+          fullPath: fullPath,
+          code: valueAt(row, codeIndex).trim().toUpperCase(),
+          documentTypeCode: valueAt(row, typeIndex).trim().toUpperCase(),
+          sizeInBytes: int.tryParse(valueAt(row, sizeIndex).trim()) ?? 0,
+          lastModified: DateTime.tryParse(valueAt(row, modifiedIndex).trim()),
+        ),
+      );
+
+      if (copied.isNotEmpty) copiedTo[fullPath] = copied;
+    }
+
+    return CsvIndexData(files: files, copiedTo: copiedTo);
+  }
+
+  /// Splits RFC 4180 CSV text into rows and fields.
+  static List<List<String>> _parseCsvRows(String content) {
+    final rows = <List<String>>[];
+    var row = <String>[];
+    final field = StringBuffer();
+    var inQuotes = false;
+
+    void endField() {
+      row.add(field.toString());
+      field.clear();
+    }
+
+    void endRow() {
+      endField();
+      rows.add(row);
+      row = <String>[];
+    }
+
+    for (var i = 0; i < content.length; i++) {
+      final char = content[i];
+
+      if (inQuotes) {
+        if (char == '"') {
+          if (i + 1 < content.length && content[i + 1] == '"') {
+            field.write('"');
+            i++;
+          } else {
+            inQuotes = false;
+          }
+        } else {
+          field.write(char);
+        }
+        continue;
+      }
+
+      switch (char) {
+        case '"':
+          inQuotes = true;
+        case ',':
+          endField();
+        case '\r':
+          if (i + 1 < content.length && content[i + 1] == '\n') i++;
+          endRow();
+        case '\n':
+          endRow();
+        default:
+          field.write(char);
+      }
+    }
+
+    if (field.isNotEmpty || row.isNotEmpty) {
+      endRow();
+    }
+
+    return rows;
   }
 
   /// Copies every file whose document code is shared with at least one other
@@ -476,6 +653,7 @@ class FileIndexService {
     final copied = <String>[];
     final skipped = <String>[];
     final warnings = <String>[];
+    final copiedTo = <String, String>{};
     final reservedNames = <String, Set<String>>{};
 
     for (final group in groups) {
@@ -496,7 +674,7 @@ class FileIndexService {
       if (!await _ensureDirectory(groupRoot, warnings)) continue;
 
       for (final file in group.files) {
-        final target = await _copyInto(
+        final outcome = await _copyInto(
           file: file,
           targetDirectory: groupRoot,
           overwrite: overwrite,
@@ -504,7 +682,11 @@ class FileIndexService {
           skipped: skipped,
           warnings: warnings,
         );
-        if (target != null) copied.add(target);
+        final target = outcome.target;
+        if (target != null) {
+          copiedTo[file.fullPath] = target;
+          if (outcome.copied) copied.add(target);
+        }
       }
     }
 
@@ -519,6 +701,7 @@ class FileIndexService {
       groups: groups,
       copiedFiles: copied,
       skippedFiles: skipped,
+      copiedToBySource: copiedTo,
       warnings: warnings,
     );
   }
@@ -576,6 +759,7 @@ class FileIndexService {
     final noCode = <String>[];
     final skipped = <String>[];
     final warnings = <String>[];
+    final copiedTo = <String, String>{};
     final reservedNames = <String, Set<String>>{};
 
     // Shared codes first so their folders exist before loose files land in the
@@ -598,7 +782,7 @@ class FileIndexService {
       if (!await _ensureDirectory(groupRoot, warnings)) continue;
 
       for (final file in group.files) {
-        final target = await _copyInto(
+        final outcome = await _copyInto(
           file: file,
           targetDirectory: groupRoot,
           overwrite: overwrite,
@@ -606,7 +790,11 @@ class FileIndexService {
           skipped: skipped,
           warnings: warnings,
         );
-        if (target != null) copied.add(target);
+        final target = outcome.target;
+        if (target != null) {
+          copiedTo[file.fullPath] = target;
+          if (outcome.copied) copied.add(target);
+        }
       }
     }
 
@@ -615,7 +803,7 @@ class FileIndexService {
       final reserved = reservedNames.putIfAbsent('__root__', () => <String>{});
 
       for (final file in looseSources) {
-        final target = await _copyInto(
+        final outcome = await _copyInto(
           file: file,
           targetDirectory: destination,
           overwrite: overwrite,
@@ -623,9 +811,13 @@ class FileIndexService {
           skipped: skipped,
           warnings: warnings,
         );
+        final target = outcome.target;
         if (target != null) {
-          copied.add(target);
-          loose.add(target);
+          copiedTo[file.fullPath] = target;
+          if (outcome.copied) {
+            copied.add(target);
+            loose.add(target);
+          }
         }
       }
     }
@@ -643,7 +835,7 @@ class FileIndexService {
         );
 
         for (final file in noCodeSources) {
-          final target = await _copyInto(
+          final outcome = await _copyInto(
             file: file,
             targetDirectory: noCodeRoot,
             overwrite: overwrite,
@@ -651,9 +843,13 @@ class FileIndexService {
             skipped: skipped,
             warnings: warnings,
           );
+          final target = outcome.target;
           if (target != null) {
-            copied.add(target);
-            noCode.add(target);
+            copiedTo[file.fullPath] = target;
+            if (outcome.copied) {
+              copied.add(target);
+              noCode.add(target);
+            }
           }
         }
       }
@@ -673,13 +869,17 @@ class FileIndexService {
       looseFiles: loose,
       noCodeFiles: noCode,
       skippedFiles: skipped,
+      copiedToBySource: copiedTo,
       warnings: warnings,
     );
   }
 
   /// Copies [file] into [targetDirectory], recording skips and failures.
-  /// Returns the destination path, or `null` when nothing was written.
-  static Future<String?> _copyInto({
+  ///
+  /// The returned target is set even when the file was already there, so callers
+  /// can record where the copy lives. [copied] is false when the destination was
+  /// already up to date.
+  static Future<_CopyOutcome> _copyInto({
     required IndexedFile file,
     required String targetDirectory,
     required bool overwrite,
@@ -687,28 +887,30 @@ class FileIndexService {
     required List<String> skipped,
     required List<String> warnings,
   }) async {
-    final target = await _resolveCopyTarget(
+    final decision = await _resolveCopyTarget(
       targetDirectory,
       file,
       overwrite: overwrite,
       reservedNames: reservedNames,
     );
+    final target = decision.target;
 
-    if (target == null) {
-      _log.t('Skipping already copied file: ${file.fullPath}');
+    if (!decision.copy) {
+      _log.t('Skipping already copied file: ${file.fullPath} -> "$target".');
+      reservedNames.add(p.basename(target).toLowerCase());
       skipped.add(file.fullPath);
-      return null;
+      return (target: target, copied: false);
     }
 
     try {
       await File(file.fullPath).copy(target);
       reservedNames.add(p.basename(target).toLowerCase());
       _log.t('Copied "${file.fullPath}" -> "$target".');
-      return target;
+      return (target: target, copied: true);
     } on FileSystemException catch (error) {
       _log.w('Could not copy file: ${file.fullPath}', error: error);
       warnings.add('Could not copy "${file.fullPath}": ${error.message}');
-      return null;
+      return (target: null, copied: false);
     }
   }
 
@@ -727,9 +929,12 @@ class FileIndexService {
     }
   }
 
-  /// Chooses the destination path for [file] inside [groupRoot], or `null` when
-  /// the file is already there (or is its own destination).
-  static Future<String?> _resolveCopyTarget(
+  /// Chooses the destination path for [file] inside [targetDirectory].
+  ///
+  /// [copy] is false when the destination already holds the file (same name and
+  /// size, or the source itself), so the copy can be skipped without losing the
+  /// destination path.
+  static Future<_TargetDecision> _resolveCopyTarget(
     String targetDirectory,
     IndexedFile file, {
     required bool overwrite,
@@ -737,7 +942,7 @@ class FileIndexService {
   }) async {
     final direct = p.join(targetDirectory, file.fileName);
     if (p.equals(p.normalize(file.fullPath), p.normalize(direct))) {
-      return null;
+      return (target: direct, copy: false);
     }
 
     final directName = p.basename(direct).toLowerCase();
@@ -748,13 +953,13 @@ class FileIndexService {
 
     if (!reservedNames.contains(directName) &&
         (!directExists || (overwrite && directIsFile))) {
-      return direct;
+      return (target: direct, copy: true);
     }
 
     if (directIsFile &&
         !overwrite &&
         await directFile.length() == file.sizeInBytes) {
-      return null;
+      return (target: direct, copy: false);
     }
 
     final extension = p.extension(file.fileName);
@@ -774,13 +979,13 @@ class FileIndexService {
 
       if (!reservedNames.contains(candidateName.toLowerCase()) &&
           (!candidateExists || (overwrite && candidateIsFile))) {
-        return candidate;
+        return (target: candidate, copy: true);
       }
 
       if (candidateIsFile &&
           !overwrite &&
           await candidateFile.length() == file.sizeInBytes) {
-        return null;
+        return (target: candidate, copy: false);
       }
 
       counter++;

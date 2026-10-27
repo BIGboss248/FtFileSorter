@@ -57,6 +57,9 @@ class _FileIndexerScreenState extends State<FileIndexerScreen> {
   FileIndexResult? _result;
   DuplicateCopyResult? _copyResult;
 
+  /// Source path -> copy destination, exported in the CSV `Copied To` column.
+  Map<String, String> _copiedTo = const {};
+
   /// 1-based position of each file in the full sorted result. Shared with the
   /// CSV export so table rows and exported rows carry the same index.
   Map<IndexedFile, int> _indexByFile = const {};
@@ -197,6 +200,7 @@ class _FileIndexerScreenState extends State<FileIndexerScreen> {
         _isScanning = false;
         _errorMessage = null;
         _copyResult = null;
+        _copiedTo = const {};
         _typeFilter = _allTypesFilter;
         _page = 0;
       });
@@ -258,7 +262,11 @@ class _FileIndexerScreenState extends State<FileIndexerScreen> {
 
       _log.d('CSV destination selected: "$targetPath".');
 
-      await widget.indexService.writeCsv(targetPath, result.files);
+      await widget.indexService.writeCsv(
+        targetPath,
+        result.files,
+        copiedTo: _copiedTo,
+      );
 
       stopwatch.stop();
 
@@ -384,7 +392,10 @@ class _FileIndexerScreenState extends State<FileIndexerScreen> {
         '${stopwatch.elapsedMilliseconds} ms.',
       );
 
-      setState(() => _copyResult = copyResult);
+      setState(() {
+        _copyResult = copyResult;
+        _copiedTo = copyResult.copiedToBySource;
+      });
 
       _showSnackBar(
         copyResult.hasWarnings && copyResult.totalCopied == 0

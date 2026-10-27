@@ -5,7 +5,7 @@ starting the Flutter UI.
 
 | Tool | Purpose |
 | --- | --- |
-| `index_folder.dart` | Index a folder tree to CSV and optionally copy files into a destination, sorted by document code. |
+| `index_folder.dart` | Index a folder tree to CSV, then optionally copy files into a destination, sorted by document code. |
 
 Run the tools from the repository root:
 
@@ -15,35 +15,88 @@ dart run tool/index_folder.dart <folder> [output.csv] [options]
 
 ## index_folder.dart
 
-Scans a folder, extracts the document code and document type from every file
-name, writes the same CSV the **File Indexer** screen exports, and can copy the
-files into a destination folder.
+The tool runs in two phases:
+
+1. **Index** — scans `<folder>`, extracts the document code and document type
+   from every file name, and writes a CSV.
+2. **Copy** (optional) — when `--copy-by-code` or `--copy-duplicates` is given,
+   copies the files into the chosen destination and rewrites the same CSV with a
+   `Copied To` column showing where each file was copied.
 
 ### Arguments
 
 | Argument | Required | Description |
 | --- | --- | --- |
 | `<folder>` | Yes | Folder to index. |
-| `[output.csv]` | No | CSV destination. Defaults to `file_index.csv` inside `<folder>`. |
+| `[output.csv]` | No | Where to save the CSV. Defaults to `file_index.csv` inside `<folder>`. Use `--csv=<path>` instead when the argument order is inconvenient. |
 
 ### Options
 
 | Option | Description |
 | --- | --- |
-| `--no-recursive` | Only index the direct children of `<folder>`. Nested folders are skipped. |
+| `--csv=<path>` | Save the CSV to `<path>`. Overrides `[output.csv]`. |
+| `--no-recursive` | Only index the direct children of `<folder>`. |
 | `--copy-by-code=<destination>` | Copy **every** indexed file into `<destination>`, sorted by document code (see below). |
 | `--copy-duplicates=<destination>` | Legacy mode: copy only files whose code is shared with at least one other file, into `<destination>/<code>/`. |
 | `--overwrite-duplicates` | Replace files that already exist in the destination. Applies to both copy modes. |
+| `--reindex` | Index again even when a CSV already exists. |
+| `--reuse-index` | Reuse an existing CSV without asking. |
+| `--recopy` | Copy again even when the destination already has a copy. |
+| `--yes`, `-y` | Answer yes to the index and copy prompts. |
+| `--help`, `-h` | Show the built-in usage text. |
 
-Copy options may be written with or without `=`. Without `=`, the next argument
-is used as the destination:
+Value options may be written with or without `=`. Without `=`, the next argument
+is the value:
 
 ```bat
 dart run tool/index_folder.dart "D:\Documents\AS BUILT" --copy-by-code "D:\Sorted"
-dart run tool/index_folder.dart "D:\Documents\AS BUILT" --copy-by-code="D:\Sorted"
+dart run tool/index_folder.dart "D:\Documents\AS BUILT" --csv "D:\exports\index.csv"
 ```
 
-`--copy-by-code` and `--copy-duplicates` cannot be combined.
+`--copy-by-code` and `--copy-duplicates` cannot be combined, and neither can
+`--reindex` with `--reuse-index`.
+
+### Choosing where the CSV is saved
+
+Three equivalent ways:
+
+```bat
+:: Second positional argument
+dart run tool/index_folder.dart "D:\Documents\AS BUILT" "D:\exports\index.csv"
+
+:: Explicit flag
+dart run tool/index_folder.dart "D:\Documents\AS BUILT" --csv="D:\exports\index.csv"
+
+:: Default: file_index.csv inside the indexed folder
+dart run tool/index_folder.dart "D:\Documents\AS BUILT"
+```
+
+The parent folder is created when it does not exist.
+
+### The `Copied To` column
+
+The CSV ends with a `Copied To` column. After a copy run, each row shows the
+destination path of that file:
+
+```text
+Index,File Name,...,Full Path,Size (Bytes),Modified,Copied To
+1,DNSSGM12000JCSS70001-0001.dwg,...,D:\Docs\AS BUILT\DWG\DNSSGM12000JCSS70001-0001.dwg,2048,...,D:\Sorted\DNSSGM12000JCSS700\DNSSGM12000JCSS70001-0001.dwg
+2,T2404.pdf,...,D:\Docs\AS BUILT\T2404.pdf,1024,...,D:\Sorted\no_code\T2404.pdf
+```
+
+- Files outside the copy mode (for example unique codes in
+  `--copy-duplicates` mode) keep the column empty.
+- A new copy run rebuilds the column from that run, so destinations from an
+  older copy folder are not mixed in.
+- Files that were already present in the destination with the same size are
+  recorded too, because the tool knows where they live.
+- A failed copy leaves the column empty and prints a warning.
+- Re-indexing preserves destinations from the previous CSV for files that still
+  exist. A completely new CSV starts with an empty column.
+
+Because the copy step runs after indexing, the CSV is written twice in a copy
+run: once right after the index (so the index exists even if copying fails) and
+again at the end with the destinations filled in.
 
 ### How files are sorted (`--copy-by-code`)
 
@@ -78,6 +131,9 @@ D:\Sorted/
    └─ T2404.pdf                           <- name has no complete code
 ```
 
+`--copy-duplicates` uses only the first two rules and ignores unique codes and
+names without a complete code.
+
 ### Copy rules
 
 - Source files are **copied**, never moved or deleted.
@@ -88,11 +144,45 @@ D:\Sorted/
   source is treated as already copied and skipped.
 - Two source files with the same name inside one code folder are both kept; the
   later ones get ` (2)`, ` (3)`, ... before the extension.
-- Files with a complete code appear exactly once in the destination: in their
-  code folder when the code is shared, or loose in the destination when it is
-  unique.
 - Use a destination outside the indexed folder, otherwise the copies will be
   picked up by the next index run.
+
+### Preventing repeated work (prompts)
+
+The tool remembers what it already did and asks before doing it again.
+
+**Already indexed.** When the chosen CSV exists, the tool reads it and asks:
+
+```text
+An index already exists at "D:\exports\index.csv" (412 rows, saved 2026-10-27 14:05). Index the folder again? [y/N]
+```
+
+- Answering **no** reuses the existing CSV: no scan, no rewrite. The copy phase
+  then works from the rows already in the CSV.
+- Answering **yes** scans the folder again and writes a fresh CSV.
+- `--reindex` always re-scans, `--reuse-index` always reuses, `--yes` answers
+  yes.
+
+**Already copied.** After a copy, the tool writes a small state file to
+`<destination>/.ft_file_sorter_copy.json` containing the source root, mode, a
+fingerprint of the indexed files, the copy time and the number of files. On the
+next run against the same destination it asks:
+
+```text
+Destination "D:\Sorted" already contains a copy from 2026-10-27 14:12 (412 file(s)). Copy again? [y/N]
+```
+
+- Answering **no** skips the copy entirely.
+- Answering **yes** runs the copy again; files of the same size are still
+  skipped, so nothing is duplicated.
+- `--recopy` skips the question and copies, `--yes` answers yes.
+- If the source files changed since the recorded copy, the prompt says so.
+- The state file is dot-prefixed, so the indexer ignores it if the destination
+  ever sits inside a scanned folder.
+
+**Non-interactive runs** (piped input, CI, scheduled tasks) cannot answer
+prompts. They use the safe defaults: reuse an existing CSV and skip a repeated
+copy. Pass `--reindex`, `--recopy`, or `--yes` to opt in explicitly.
 
 ### Document type
 
@@ -109,11 +199,14 @@ dart run tool/index_folder.dart "D:\Documents\AS BUILT"
 :: Index only, explicit CSV path, root folder only
 dart run tool/index_folder.dart "D:\Documents\AS BUILT" "D:\exports\index.csv" --no-recursive
 
-:: Sort every file by document code
-dart run tool/index_folder.dart "D:\Documents\AS BUILT" --copy-by-code "D:\Sorted AS BUILT"
+:: Sort every file by document code, record destinations in the CSV
+dart run tool/index_folder.dart "D:\Documents\AS BUILT" --csv "D:\exports\index.csv" --copy-by-code "D:\Sorted AS BUILT"
 
-:: Re-run a sort and replace files that are already in the destination
-dart run tool/index_folder.dart "D:\Documents\AS BUILT" --copy-by-code "D:\Sorted AS BUILT" --overwrite-duplicates
+:: First run in a scheduled task: index and copy without prompts
+dart run tool/index_folder.dart "D:\Documents\AS BUILT" --csv "D:\exports\index.csv" --copy-by-code "D:\Sorted AS BUILT" --yes
+
+:: Force a fresh index and a fresh copy, replacing existing files
+dart run tool/index_folder.dart "D:\Documents\AS BUILT" --csv "D:\exports\index.csv" --copy-by-code "D:\Sorted AS BUILT" --reindex --recopy --overwrite-duplicates
 
 :: Copy duplicate document codes only (legacy mode)
 dart run tool/index_folder.dart "D:\Documents\AS BUILT" --copy-duplicates "D:\Duplicate Codes"
@@ -123,7 +216,7 @@ dart run tool/index_folder.dart "D:\Documents\AS BUILT" --copy-duplicates "D:\Du
 
 | Code | Meaning |
 | --- | --- |
-| `0` | Index and any requested copy finished. Individual copy warnings may still be printed. |
+| `0` | Index and any requested copy finished, or a prompt was declined. |
 | `1` | Indexing failed, or every requested copy failed. |
 | `64` | Invalid arguments (usage error). |
 
@@ -131,6 +224,6 @@ dart run tool/index_folder.dart "D:\Documents\AS BUILT" --copy-duplicates "D:\Du
 
 - The **File Indexer** screen uses the same indexing service and offers the
   duplicate-only copy mode through its "Copy duplicate document codes" switch.
-  Files are chosen at runtime there, so the sort-everything mode is currently
-  CLI-only.
+  Its CSV export also includes the `Copied To` column when a copy was run in the
+  same session. The sort-everything mode is CLI-only.
 - Debug logging is printed to the console for every indexed and copied file.
