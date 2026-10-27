@@ -73,6 +73,32 @@ class FileIndexResult {
   List<DuplicateCodeGroup> get duplicateCodeGroups =>
       DuplicateCodeGroup.fromFiles(files);
 
+  /// Extensions (without the dot, lowercased) found for each document type.
+  ///
+  /// Types and their extension sets are sorted, so the result can drive the
+  /// file-type rules editor without extra ordering work.
+  Map<String, Set<String>> get extensionsByDocumentType {
+    final grouped = <String, Set<String>>{};
+
+    for (final file in files) {
+      if (!file.hasDocumentType) continue;
+
+      final extension = file.extension.startsWith('.')
+          ? file.extension.substring(1).toLowerCase()
+          : file.extension.toLowerCase();
+      if (extension.isEmpty) continue;
+
+      grouped
+          .putIfAbsent(file.documentTypeCode, () => <String>{})
+          .add(extension);
+    }
+
+    final types = grouped.keys.toList()..sort();
+    return {
+      for (final type in types) type: (grouped[type]!.toList()..sort()).toSet(),
+    };
+  }
+
   /// Total number of files that belong to a [duplicateCodeGroups] entry.
   int get duplicateFileCount =>
       duplicateCodeGroups.fold(0, (sum, group) => sum + group.fileCount);

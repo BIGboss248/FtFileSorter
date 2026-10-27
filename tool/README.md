@@ -22,9 +22,13 @@ The tool runs in three phases:
 2. **Copy** (optional) — when `--copy-by-code` or `--copy-duplicates` is given,
    copies the files into the chosen destination and rewrites the same CSV with a
    `Copied To` column showing where each file was copied.
-3. **Cleanup** (optional) — when `--allowed-types` is given, copied files whose
-   extension is not allowed for their document type are moved into
-   `<destination>/trash/`, and the CSV is updated with their final paths.
+3. **Cleanup** (optional) — when `--allowed-types` is given (or the shared rules
+   file has rules), copied files whose extension is not allowed for their
+   document type are moved into `<destination>/trash/`, and the CSV is updated
+   with their final paths.
+
+The final CSV is also copied into the copy destination itself, so each sorted
+folder carries its own index snapshot.
 
 ### Arguments
 
@@ -43,6 +47,7 @@ The tool runs in three phases:
 | `--copy-duplicates=<destination>` | Legacy mode: copy only files whose code is shared with at least one other file, into `<destination>/<code>/`. |
 | `--overwrite-duplicates` | Replace files that already exist in the destination. Applies to both copy modes. |
 | `--allowed-types=<rules>` | Clean the copy: keep only the listed extensions per document type and move the rest into `<destination>/trash/`. See [Trash cleanup](#trash-cleanup---allowed-types). Repeatable. |
+| `--allowed-types-file=<file>` | Load the cleanup rules from a JSON file. When neither this nor `--allowed-types` is given, the shared rules file edited in the app (`%APPDATA%\FtFileSorter\allowed_types.json`) is loaded automatically. |
 | `--reindex` | Index again even when a CSV already exists. |
 | `--reuse-index` | Reuse an existing CSV without asking. |
 | `--recopy` | Copy again even when the destination already has a copy. |
@@ -106,6 +111,11 @@ times in a copy run: once right after the index (so the index exists even if
 copying fails), again with the copy destinations, and once more when the cleanup
 step moves files to the trash.
 
+When a copy destination is used, the final CSV is also written to
+`<destination>/<csv file name>` (for example `D:\Sorted\index.csv`), including
+when the copy was skipped or failed. The snapshot uses the same name as the
+chosen CSV; if the CSV already lives in the destination, nothing is duplicated.
+
 ### How files are sorted (`--copy-by-code`)
 
 The document code is the **first 18 characters** of the file name, ignoring the
@@ -158,8 +168,9 @@ names without a complete code.
 ### Trash cleanup (`--allowed-types`)
 
 Some document types only need certain file formats (for example drawings that
-should keep DWG and PDF, but not DXF). Pass a rule string to keep only the wanted
-extensions after copying:
+should keep DWG and PDF, but not DXF). Pass a rule string, a rules file, or use
+the shared rules edited in the app (see
+[Rules file and the app editor](#rules-file-and-the-app-editor)):
 
 ```bat
 dart run tool/index_folder.dart "D:\Documents\AS BUILT" --copy-by-code "D:\Sorted AS BUILT" --allowed-types="JC=dwg,pdf;JA=pdf"
@@ -217,6 +228,55 @@ D:\Sorted/
    ├─ DNSSGH13900JACD00100-0001.dxf        <- JA only allows DWG
    └─ DNSSGM12000JCSS700/
       └─ DNSSGM12000JCSS70001-0001.dwg     <- DWG is not allowed for JC
+```
+
+### Rules file and the app editor
+
+The associations can also be maintained in the **File Indexer** screen:
+
+1. Index a folder.
+2. Press **File Type Rules** in the results toolbar.
+3. Each detected document type is shown with a chip per file extension found in
+   the index. Checked extensions are kept; unchecked extensions are trashed by
+   the CLI after copying.
+4. **No rule** removes the assignment, keeping every file type for that
+   document type.
+
+Every change is written immediately to the shared rules file, so the CLI picks
+it up on its next run. The file is a flat JSON map:
+
+```json
+{
+  "JC": ["dwg", "pdf"],
+  "JA": ["pdf"]
+}
+```
+
+Document types missing from the file are left untouched during cleanup; an empty
+list (`"JC": []`) trashes every copied file of that type.
+
+The tool locates the file in this order:
+
+1. `--allowed-types-file=<path>` when given.
+2. The `FTFILESORTER_RULES_FILE` environment variable.
+3. `%APPDATA%\FtFileSorter\allowed_types.json` (or a local `.ft_file_sorter`
+   folder in the working directory when APPDATA is unavailable).
+
+The File Indexer screen writes to the same location, and the dialog shows the
+exact path. The CLI loads the shared file automatically whenever a copy is
+requested and neither `--allowed-types` nor `--allowed-types-file` is given. An
+explicit `--allowed-types` string overrides the file; the two flags cannot be
+combined.
+
+The shared file lives in the application-data folder rather than the repository
+`config` folder so the GUI app and the CLI always resolve the *same* absolute
+path: the app and the CLI are launched with different working directories, and
+resolving through the working directory previously made the editor save one file
+while the CLI read another. To keep the rules under version control in the
+repository instead, point the tool at the repository file explicitly:
+
+```bat
+dart run tool/index_folder.dart "D:\Documents\AS BUILT" --copy-by-code "D:\Sorted" --allowed-types-file "config/allowed_types.json"
 ```
 
 ### Preventing repeated work (prompts)
@@ -278,6 +338,13 @@ dart run tool/index_folder.dart "D:\Documents\AS BUILT" --csv "D:\exports\index.
 :: Sort, then trash extensions that are not wanted per document type
 dart run tool/index_folder.dart "D:\Documents\AS BUILT" --csv "D:\exports\index.csv" --copy-by-code "D:\Sorted AS BUILT" --allowed-types "JC=dwg,pdf;JA=pdf"
 
+:: Same cleanup, but use the rules saved by the File Indexer screen
+:: (%APPDATA%\FtFileSorter\allowed_types.json is loaded automatically)
+dart run tool/index_folder.dart "D:\Documents\AS BUILT" --csv "D:\exports\index.csv" --copy-by-code "D:\Sorted AS BUILT"
+
+:: Use a specific rules file
+dart run tool/index_folder.dart "D:\Documents\AS BUILT" --copy-by-code "D:\Sorted AS BUILT" --allowed-types-file "D:\exports\allowed_types.json"
+
 :: Multiple rules with explicit dots and wildcards
 dart run tool/index_folder.dart "D:\Documents\AS BUILT" --copy-by-code "D:\Sorted AS BUILT" --allowed-types="JC=dwg,.PDF;JA=*;CA="
 
@@ -303,6 +370,8 @@ dart run tool/index_folder.dart "D:\Documents\AS BUILT" --copy-duplicates "D:\Du
 
 - The **File Indexer** screen uses the same indexing service and offers the
   duplicate-only copy mode through its "Copy duplicate document codes" switch.
-  Its CSV export also includes the `Copied To` column when a copy was run in the
-  same session. The sort-everything mode and trash cleanup are CLI-only.
+  After copying it moves disallowed file types into `<destination>/trash/` using
+  the shared rules edited in the File Type Rules dialog, and its CSV export
+  includes the `Copied To` column reflecting those final paths. The
+  sort-everything copy mode is CLI-only.
 - Debug logging is printed to the console for every indexed and copied file.

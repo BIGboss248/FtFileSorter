@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:adaptive_theme/adaptive_theme.dart';
 import 'package:flutter/material.dart';
@@ -6,9 +8,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ft_file_sorter/core/theme/app_theme.dart';
 import 'package:ft_file_sorter/src/data/models/duplicate_code_group.dart';
 import 'package:ft_file_sorter/src/data/models/indexed_file.dart';
+import 'package:ft_file_sorter/src/logic/services/allowed_types_rules_service.dart';
 import 'package:ft_file_sorter/src/logic/services/file_index_service.dart';
 import 'package:ft_file_sorter/src/presentation/screens/configuration_screen.dart';
 import 'package:ft_file_sorter/src/presentation/screens/file_indexer_screen.dart';
+import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shared_preferences_platform_interface/in_memory_shared_preferences_async.dart';
 import 'package:shared_preferences_platform_interface/shared_preferences_async_platform_interface.dart';
@@ -69,9 +73,13 @@ class _CallbackIndexService extends FileIndexService {
 /// Records the destination of a duplicate-code copy and returns a synthetic
 /// result so widget tests never touch the file system.
 class _FakeCopyService extends FileIndexService {
-  _FakeCopyService(this.result);
+  _FakeCopyService(this.result, {this.trashResult});
 
   final FileIndexResult result;
+
+  /// Synthetic cleanup result returned by [moveDisallowedFiles]. When `null`
+  /// the fake reports an empty trash, keeping tests hermetic.
+  final TrashResult? trashResult;
   String? copiedDestination;
   bool? copiedOverwrite;
 
@@ -108,6 +116,20 @@ class _FakeCopyService extends FileIndexService {
           for (final file in group.files) file.fullPath,
       ],
     );
+  }
+
+  @override
+  Future<TrashResult> moveDisallowedFiles({
+    required List<IndexedFile> files,
+    required Map<String, String> copiedToBySource,
+    required Map<String, Set<String>> allowedExtensionsByDocumentType,
+    required String destinationRoot,
+  }) async {
+    return trashResult ??
+        TrashResult(
+          destinationRoot: destinationRoot,
+          trashRoot: p.join(destinationRoot, 'trash'),
+        );
   }
 }
 
@@ -433,6 +455,11 @@ void main() {
         buildTestableWidget(
           FileIndexerScreen(
             indexService: service,
+            // Point the rules at a non-existent file so the copy test does not
+            // read the developer's real shared rules and stays hermetic.
+            rulesService: AllowedTypesRulesService(
+              filePath: p.join(Directory.systemTemp.path, 'ft_no_rules.json'),
+            ),
             initialFolderPath: r'C:\Docs\AS BUILT',
           ),
         ),
@@ -463,6 +490,127 @@ void main() {
         findsOneWidget,
       );
       expect(find.text(r'D:\Duplicate Codes'), findsNWidgets(2));
+    });
+
+    testWidgets('moves disallowed files to trash after copying', (tester) async {
+      tester.view.physicalSize = const Size(1600, 1000);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      final tempDir = await tester.runAsync(
+        () => Directory.systemTemp.createTemp('ft_ui_trash_'),
+      );
+      addTearDown(() {
+        if (tempDir != null && tempDir.existsSync()) {
+          tempDir.deleteSync(recursive: true);
+        }
+      });
+      final rulesPath = p.join(tempDir!.path, 'allowed_types.json');
+      await tester.runAsync(
+        () => File(rulesPath).writeAsString('{"JC": ["pdf"]}'),
+      );
+
+      const trashResult = TrashResult(
+        destinationRoot: r'D:\Duplicate Codes',
+        trashRoot: r'D:\Duplicate Codes\trash',
+        movedTo: {
+          r'C:\Docs\AS BUILT\DWG\DNSSGM12000JCSS70001-0001.dwg':
+              r'D:\Duplicate Codes\trash\DNSSGM12000JCSS700'
+                  r'\DNSSGM12000JCSS70001-0001.dwg',
+        },
+      );
+
+      final service = _FakeCopyService(
+        buildDuplicateResult(),
+        trashResult: trashResult,
+      );
+
+      await tester.pumpWidget(
+        buildTestableWidget(
+          FileIndexerScreen(
+            indexService: service,
+            rulesService: AllowedTypesRulesService(filePath: rulesPath),
+            initialFolderPath: r'C:\Docs\AS BUILT',
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Index Folder'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byType(Switch).last);
+      await tester.pumpAndSettle();
+
+      final destinationField = find.byWidgetPredicate(
+        (widget) =>
+            widget is TextField &&
+            widget.decoration?.labelText == 'Duplicate Codes Destination',
+      );
+
+      await tester.enterText(destinationField, r'D:\Duplicate Codes');
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Copy Duplicates (1)'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.textContaining('Trash cleanup: 1 file(s) moved'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('Moved 1 to trash'), findsOneWidget);
+    });
+
+    testWidgets('edits shared document type file rules', (tester) async {
+      tester.view.physicalSize = const Size(1600, 1100);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      final tempDir = await tester.runAsync(
+        () => Directory.systemTemp.createTemp('ft_ui_rules_'),
+      );
+      addTearDown(() {
+        if (tempDir != null && tempDir.existsSync()) {
+          tempDir.deleteSync(recursive: true);
+        }
+      });
+      final rulesPath = p.join(tempDir!.path, 'allowed_types.json');
+
+      await tester.pumpWidget(
+        buildTestableWidget(
+          FileIndexerScreen(
+            indexService: _FakeCopyService(buildDuplicateResult()),
+            rulesService: AllowedTypesRulesService(filePath: rulesPath),
+            initialFolderPath: r'C:\Docs\AS BUILT',
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Index Folder'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('File Type Rules'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Allowed File Types per Document Type'), findsOneWidget);
+      expect(find.widgetWithText(FilterChip, '.dwg'), findsOneWidget);
+      expect(find.widgetWithText(FilterChip, '.pdf'), findsOneWidget);
+
+      final dwgChip = tester.widget<FilterChip>(
+        find.widgetWithText(FilterChip, '.dwg'),
+      );
+      expect(dwgChip.selected, isTrue);
+
+      await tester.tap(find.widgetWithText(FilterChip, '.dwg'));
+      await tester.pumpAndSettle();
+
+      final saved = jsonDecode(File(rulesPath).readAsStringSync());
+      expect(saved, isA<Map<String, dynamic>>());
+      expect((saved as Map<String, dynamic>)['JC'], equals(['pdf']));
+
+      await tester.tap(find.text('Close'));
+      await tester.pumpAndSettle();
     });
 
     testWidgets('opens from the configuration screen', (tester) async {

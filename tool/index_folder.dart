@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:ft_file_sorter/core/logging/app_logger.dart';
 import 'package:ft_file_sorter/src/data/models/indexed_file.dart';
+import 'package:ft_file_sorter/src/logic/services/allowed_types_rules_service.dart';
 import 'package:ft_file_sorter/src/logic/services/file_index_service.dart';
 import 'package:path/path.dart' as p;
 
@@ -28,6 +29,10 @@ const String _usage =
     '                             Format: "JC=dwg,pdf;JA=pdf". Extensions are\n'
     '                             case-insensitive, dots optional, "*" keeps all.\n'
     '                             Types not listed are left untouched. Repeatable.\n'
+    '  --allowed-types-file=<f>   Load the rules from a JSON file instead. When\n'
+    '                             omitted, the shared rules file edited in the\n'
+    '                             app (%%APPDATA%%/FtFileSorter/allowed_types.json)\n'
+    '                             is loaded automatically.\n'
     '  --reindex                  Index again even when a CSV already exists.\n'
     '  --reuse-index              Reuse an existing CSV without asking.\n'
     '  --recopy                   Copy again even when <dest> already has a copy.\n'
@@ -173,8 +178,56 @@ Future<void> main(List<String> arguments) async {
   final copyDestination = options.copyDestination;
   if (copyDestination == null) return;
 
+  final destination = p.normalize(p.absolute(copyDestination));
+
+  var allowedExtensions = options.allowedExtensions;
+  if (allowedExtensions.isEmpty) {
+    final rulesService = AllowedTypesRulesService(
+      filePath: options.allowedTypesFile,
+    );
+
+    try {
+      final rulesPath = await rulesService.resolvePath();
+
+      if (options.allowedTypesFile != null && !await File(rulesPath).exists()) {
+        log.e('Rules file not found: "$rulesPath".');
+        stderr.writeln('Rules file not found: "$rulesPath"');
+        exitCode = 64;
+        return;
+      }
+
+      final loaded = await rulesService.load();
+      if (loaded.isNotEmpty) {
+        allowedExtensions = loaded;
+        log.i(
+          'Loaded ${loaded.length} document type rule(s) from "$rulesPath".',
+        );
+        stdout.writeln('Using document type rules from: $rulesPath');
+      } else if (options.allowedTypesFile != null) {
+        stdout.writeln('Rules file "$rulesPath" is empty; cleanup disabled.');
+      } else {
+        stdout.writeln(
+          'No document type rules found at "$rulesPath"; trash cleanup '
+          'disabled. Configure them in the app (File Indexer > File Type '
+          'Rules) or pass --allowed-types.',
+        );
+      }
+    } on FormatException catch (error) {
+      log.w('Could not read document type rules: ${error.message}');
+      stderr.writeln(
+        'Warning: could not read document type rules (${error.message}). '
+        'Cleanup disabled.',
+      );
+    } on FileSystemException catch (error) {
+      log.w('Could not read document type rules: ${error.message}');
+      stderr.writeln(
+        'Warning: could not read document type rules (${error.message}). '
+        'Cleanup disabled.',
+      );
+    }
+  }
+
   try {
-    final destination = p.normalize(p.absolute(copyDestination));
     final statePath = p.join(destination, _copyStateFileName);
     final previous = await _CopyState.read(statePath);
     final fingerprint = _fingerprint(files);
@@ -230,11 +283,11 @@ Future<void> main(List<String> arguments) async {
     _printCopySummary(copyResult, options.copyMode!);
     stdout.writeln('CSV updated with copy destinations: ${options.csvPath}');
 
-    if (options.allowedExtensions.isNotEmpty) {
+    if (allowedExtensions.isNotEmpty) {
       final trashResult = await service.moveDisallowedFiles(
         files: files,
         copiedToBySource: copyResult.copiedToBySource,
-        allowedExtensionsByDocumentType: options.allowedExtensions,
+        allowedExtensionsByDocumentType: allowedExtensions,
         destinationRoot: destination,
       );
 
@@ -244,7 +297,7 @@ Future<void> main(List<String> arguments) async {
       }
 
       stdout.writeln(
-        'Trash cleanup (${_describeRules(options.allowedExtensions)}): '
+        'Trash cleanup (${_describeRules(allowedExtensions)}): '
         '${trashResult.totalMoved} file(s) moved to ${trashResult.trashRoot}.',
       );
 
@@ -299,6 +352,10 @@ Future<void> main(List<String> arguments) async {
       'Copy failed for destination "$copyDestination": ${error.message}',
     );
     exitCode = 1;
+  } finally {
+    // Keep a snapshot of the final CSV inside the copy destination, including
+    // when the copy itself was skipped or failed.
+    await _saveCsvCopy(options.csvPath, destination);
   }
 }
 
@@ -311,6 +368,7 @@ class _Options {
   final String? copyDestination;
   final bool overwrite;
   final Map<String, Set<String>> allowedExtensions;
+  final String? allowedTypesFile;
   final bool reindex;
   final bool reuseIndex;
   final bool recopy;
@@ -324,6 +382,7 @@ class _Options {
     required this.copyDestination,
     required this.overwrite,
     required this.allowedExtensions,
+    required this.allowedTypesFile,
     required this.reindex,
     required this.reuseIndex,
     required this.recopy,
@@ -337,6 +396,7 @@ class _Options {
     String? csvPath;
     String? byCodeDestination;
     String? duplicateDestination;
+    String? allowedTypesFile;
     var recursive = true;
     var overwrite = false;
     var reindex = false;
@@ -401,6 +461,7 @@ class _Options {
         '--copy-by-code': 'byCode',
         '--copy-duplicates': 'duplicates',
         '--allowed-types': 'allowed',
+        '--allowed-types-file': 'allowedFile',
       };
       if (valueFlags.containsKey(argument)) {
         if (i + 1 >= arguments.length) {
@@ -417,6 +478,8 @@ class _Options {
             duplicateDestination = value;
           case 'allowed':
             if (!addAllowedExtensions(value)) return null;
+          case 'allowedFile':
+            allowedTypesFile = value;
         }
         continue;
       }
@@ -441,6 +504,12 @@ class _Options {
         )) {
           return null;
         }
+        continue;
+      }
+      if (argument.startsWith('--allowed-types-file=')) {
+        allowedTypesFile = argument
+            .substring('--allowed-types-file='.length)
+            .trim();
         continue;
       }
       if (argument.startsWith('--')) {
@@ -485,6 +554,16 @@ class _Options {
       );
       return null;
     }
+    if (allowedExtensions.isNotEmpty && allowedTypesFile != null) {
+      _usageError(
+        '--allowed-types and --allowed-types-file cannot be combined.',
+      );
+      return null;
+    }
+    if (allowedTypesFile != null && allowedTypesFile.isEmpty) {
+      _usageError('The --allowed-types-file path must not be empty.');
+      return null;
+    }
     if (csvPath != null && csvPath.isEmpty) {
       _usageError('The --csv path must not be empty.');
       return null;
@@ -511,6 +590,7 @@ class _Options {
       copyDestination: copyDestination,
       overwrite: overwrite,
       allowedExtensions: allowedExtensions,
+      allowedTypesFile: allowedTypesFile,
       reindex: reindex,
       reuseIndex: reuseIndex,
       recopy: recopy,
@@ -696,6 +776,28 @@ String _formatTimestamp(DateTime time) {
   String two(int value) => value.toString().padLeft(2, '0');
   return '${local.year}-${two(local.month)}-${two(local.day)} '
       '${two(local.hour)}:${two(local.minute)}';
+}
+
+/// Writes a snapshot of the final CSV into the copy destination.
+Future<void> _saveCsvCopy(String csvPath, String destination) async {
+  final log = createLogger('index_folder');
+  final source = File(p.normalize(p.absolute(csvPath)));
+  if (!await source.exists()) return;
+
+  final targetPath = p.normalize(p.join(destination, p.basename(source.path)));
+  if (p.equals(source.path, targetPath)) return;
+
+  try {
+    await File(targetPath).parent.create(recursive: true);
+    await source.copy(targetPath);
+    log.i('CSV snapshot written to destination: "$targetPath".');
+    stdout.writeln('CSV copy saved to destination: $targetPath');
+  } on FileSystemException catch (error) {
+    log.w('Could not copy the CSV into "$destination".', error: error);
+    stderr.writeln(
+      'Warning: could not copy the CSV to "$targetPath": ${error.message}',
+    );
+  }
 }
 
 String _describeRules(Map<String, Set<String>> rules) {

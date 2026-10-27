@@ -67,6 +67,50 @@ void main() {
       expect(file.hasCompleteCode, isTrue);
       expect(file.hasDocumentType, isTrue);
     });
+
+    test('groups detected extensions by document type', () {
+      const result = FileIndexResult(
+        rootPath: r'C:\Docs',
+        files: [
+          IndexedFile(
+            fileName: 'a.pdf',
+            directoryPath: r'C:\Docs',
+            fullPath: r'C:\Docs\a.pdf',
+            code: 'CODEA',
+            documentTypeCode: 'JC',
+          ),
+          IndexedFile(
+            fileName: 'b.DWG',
+            directoryPath: r'C:\Docs',
+            fullPath: r'C:\Docs\b.DWG',
+            code: 'CODEB',
+            documentTypeCode: 'JC',
+          ),
+          IndexedFile(
+            fileName: 'c.pdf',
+            directoryPath: r'C:\Docs',
+            fullPath: r'C:\Docs\c.pdf',
+            code: 'CODEC',
+            documentTypeCode: 'JA',
+          ),
+          IndexedFile(
+            fileName: 'T2404.pdf',
+            directoryPath: r'C:\Docs',
+            fullPath: r'C:\Docs\T2404.pdf',
+            code: 'T2404',
+            documentTypeCode: '',
+          ),
+        ],
+      );
+
+      expect(
+        result.extensionsByDocumentType,
+        equals({
+          'JA': {'pdf'},
+          'JC': {'dwg', 'pdf'},
+        }),
+      );
+    });
   });
 
   group('FileIndexService.indexDirectory', () {

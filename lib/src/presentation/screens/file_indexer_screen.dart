@@ -7,7 +7,9 @@ import '../../../core/theme/widgets/animated_theme_toggle.dart';
 import '../../data/models/document_type_info.dart';
 import '../../data/models/duplicate_code_group.dart';
 import '../../data/models/indexed_file.dart';
+import '../../logic/services/allowed_types_rules_service.dart';
 import '../../logic/services/file_index_service.dart';
+import '../widgets/allowed_types_dialog.dart';
 import '../navigation/app_navigation_drawer.dart';
 
 /// Screen that scans a folder tree and renders every discovered file together
@@ -17,12 +19,17 @@ class FileIndexerScreen extends StatefulWidget {
   /// Service used to walk the file system. Overridable for tests.
   final FileIndexService indexService;
 
+  /// Shared document-type/file-type rules used by the CLI cleanup. Overridable
+  /// for tests and for pointing at a custom rules file.
+  final AllowedTypesRulesService rulesService;
+
   /// Optional folder path used to pre-fill the input.
   final String? initialFolderPath;
 
   const FileIndexerScreen({
     super.key,
     this.indexService = const FileIndexService(),
+    this.rulesService = const AllowedTypesRulesService(),
     this.initialFolderPath,
   });
 
@@ -56,6 +63,7 @@ class _FileIndexerScreenState extends State<FileIndexerScreen> {
   int _page = 0;
   FileIndexResult? _result;
   DuplicateCopyResult? _copyResult;
+  TrashResult? _trashResult;
 
   /// Source path -> copy destination, exported in the CSV `Copied To` column.
   Map<String, String> _copiedTo = const {};
@@ -200,6 +208,7 @@ class _FileIndexerScreenState extends State<FileIndexerScreen> {
         _isScanning = false;
         _errorMessage = null;
         _copyResult = null;
+        _trashResult = null;
         _copiedTo = const {};
         _typeFilter = _allTypesFilter;
         _page = 0;
@@ -370,6 +379,7 @@ class _FileIndexerScreenState extends State<FileIndexerScreen> {
     setState(() {
       _isCopying = true;
       _copyResult = null;
+      _trashResult = null;
     });
 
     try {
@@ -377,6 +387,19 @@ class _FileIndexerScreenState extends State<FileIndexerScreen> {
         result.files,
         destinationRoot: destination,
       );
+
+      // Move files whose extension is not allowed for their document type into
+      // <destination>/trash/, using the shared rules edited in the File Type
+      // Rules dialog. Runs automatically after the copy, mirroring the CLI.
+      var copiedTo = copyResult.copiedToBySource;
+      final trashResult = await _cleanupDisallowedFiles(
+        result.files,
+        copyResult.copiedToBySource,
+        destination,
+      );
+      if (trashResult != null && trashResult.movedTo.isNotEmpty) {
+        copiedTo = {...copiedTo, ...trashResult.movedTo};
+      }
 
       stopwatch.stop();
 
@@ -394,15 +417,18 @@ class _FileIndexerScreenState extends State<FileIndexerScreen> {
 
       setState(() {
         _copyResult = copyResult;
-        _copiedTo = copyResult.copiedToBySource;
+        _copiedTo = copiedTo;
+        _trashResult = trashResult;
       });
 
+      final trashMoved = trashResult?.totalMoved ?? 0;
       _showSnackBar(
         copyResult.hasWarnings && copyResult.totalCopied == 0
             ? 'Duplicate copy failed: ${copyResult.warnings.length} item(s) '
                   'could not be copied.'
             : 'Copied ${copyResult.totalCopied} file(s) into '
-                  '${copyResult.totalGroups} document-code folder(s).',
+                  '${copyResult.totalGroups} document-code folder(s).'
+                  '${trashMoved > 0 ? ' Moved $trashMoved to trash.' : ''}',
         isError: copyResult.hasWarnings && copyResult.totalCopied == 0,
       );
     } catch (error, stackTrace) {
@@ -419,6 +445,61 @@ class _FileIndexerScreenState extends State<FileIndexerScreen> {
         setState(() => _isCopying = false);
       }
     }
+  }
+
+  /// Moves copied files whose extension is not allowed for their document type
+  /// into `<destination>/trash/`. Returns `null` when no rules are configured.
+  Future<TrashResult?> _cleanupDisallowedFiles(
+    List<IndexedFile> files,
+    Map<String, String> copiedToBySource,
+    String destination,
+  ) async {
+    final Map<String, Set<String>> rules;
+    try {
+      rules = await widget.rulesService.load();
+    } catch (error) {
+      _log.w('Could not load document type rules for trash cleanup: $error');
+      return null;
+    }
+
+    if (rules.isEmpty) {
+      _log.d('No document type rules configured; trash cleanup skipped.');
+      return null;
+    }
+
+    final trashResult = await widget.indexService.moveDisallowedFiles(
+      files: files,
+      copiedToBySource: copiedToBySource,
+      allowedExtensionsByDocumentType: rules,
+      destinationRoot: destination,
+    );
+
+    _log.i(
+      'Trash cleanup applied: ${trashResult.totalMoved} file(s) moved to '
+      '"${trashResult.trashRoot}", ${trashResult.warnings.length} warning(s).',
+    );
+
+    return trashResult;
+  }
+
+  /// Opens the document-type/file-type rules editor. Changes are persisted
+  /// immediately to the shared JSON consumed by the CLI.
+  Future<void> _openAllowedTypesDialog() async {
+    final result = _result;
+    if (result == null) {
+      _log.d('Allowed types dialog requested without an index.');
+      _showSnackBar('Index a folder first to edit file type rules.');
+      return;
+    }
+
+    _log.d('Opening allowed file type rules dialog.');
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AllowedTypesDialog(
+        extensionsByDocumentType: result.extensionsByDocumentType,
+        rulesService: widget.rulesService,
+      ),
+    );
   }
 
   void _showErrorSnapshot(String message) {
@@ -499,6 +580,10 @@ class _FileIndexerScreenState extends State<FileIndexerScreen> {
                 if (_copyResult != null) ...[
                   const SizedBox(height: 16),
                   _buildCopySummaryCard(colorScheme),
+                ],
+                if (_trashResult != null) ...[
+                  const SizedBox(height: 16),
+                  _buildTrashSummaryCard(colorScheme),
                 ],
                 const SizedBox(height: 16),
                 Expanded(child: _buildBody(colorScheme)),
@@ -887,6 +972,66 @@ class _FileIndexerScreenState extends State<FileIndexerScreen> {
     );
   }
 
+  Widget _buildTrashSummaryCard(ColorScheme colorScheme) {
+    final trash = _trashResult!;
+    final hasWarnings = trash.hasWarnings;
+
+    return Card(
+      elevation: 0,
+      color: hasWarnings
+          ? colorScheme.tertiaryContainer
+          : colorScheme.errorContainer,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: ExpansionTile(
+        initiallyExpanded: hasWarnings,
+        leading: Icon(
+          hasWarnings
+              ? Icons.warning_amber_outlined
+              : Icons.delete_sweep_outlined,
+          color: hasWarnings
+              ? colorScheme.onTertiaryContainer
+              : colorScheme.onErrorContainer,
+        ),
+        title: Text(
+          'Trash cleanup: ${trash.totalMoved} file(s) moved',
+          style: TextStyle(
+            color: hasWarnings
+                ? colorScheme.onTertiaryContainer
+                : colorScheme.onErrorContainer,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        subtitle: Text(
+          trash.trashRoot,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: hasWarnings
+                ? colorScheme.onTertiaryContainer
+                : colorScheme.onErrorContainer,
+          ),
+        ),
+        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+        children: [
+          for (final warning in trash.warnings.take(10))
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  warning,
+                  style: TextStyle(
+                    color: hasWarnings
+                        ? colorScheme.onTertiaryContainer
+                        : colorScheme.onErrorContainer,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildErrorCard(ColorScheme colorScheme) {
     return Card(
       color: colorScheme.errorContainer,
@@ -1165,6 +1310,17 @@ class _FileIndexerScreenState extends State<FileIndexerScreen> {
                           }
                         },
                       ),
+                    ),
+                  ),
+                ),
+                const Spacer(),
+                OutlinedButton.icon(
+                  onPressed: _openAllowedTypesDialog,
+                  icon: const Icon(Icons.rule),
+                  label: const Text('File Type Rules'),
+                  style: OutlinedButton.styleFrom(
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
                     ),
                   ),
                 ),
