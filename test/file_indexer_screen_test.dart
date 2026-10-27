@@ -4,6 +4,7 @@ import 'package:adaptive_theme/adaptive_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ft_file_sorter/core/theme/app_theme.dart';
+import 'package:ft_file_sorter/src/data/models/duplicate_code_group.dart';
 import 'package:ft_file_sorter/src/data/models/indexed_file.dart';
 import 'package:ft_file_sorter/src/logic/services/file_index_service.dart';
 import 'package:ft_file_sorter/src/presentation/screens/configuration_screen.dart';
@@ -65,6 +66,51 @@ class _CallbackIndexService extends FileIndexService {
   }
 }
 
+/// Records the destination of a duplicate-code copy and returns a synthetic
+/// result so widget tests never touch the file system.
+class _FakeCopyService extends FileIndexService {
+  _FakeCopyService(this.result);
+
+  final FileIndexResult result;
+  String? copiedDestination;
+  bool? copiedOverwrite;
+
+  @override
+  Future<FileIndexResult> indexDirectory(
+    String rootPath, {
+    bool recursive = true,
+    bool includeHidden = false,
+    Set<String> excludePaths = const {},
+  }) async {
+    return result;
+  }
+
+  @override
+  Future<DuplicateCopyResult> copyDuplicateCodeGroups(
+    List<IndexedFile> files, {
+    required String destinationRoot,
+    bool overwrite = false,
+    bool requireCompleteCode = true,
+  }) async {
+    copiedDestination = destinationRoot;
+    copiedOverwrite = overwrite;
+
+    final groups = DuplicateCodeGroup.fromFiles(
+      files,
+      requireCompleteCode: requireCompleteCode,
+    );
+
+    return DuplicateCopyResult(
+      destinationRoot: destinationRoot,
+      groups: groups,
+      copiedFiles: [
+        for (final group in groups)
+          for (final file in group.files) file.fullPath,
+      ],
+    );
+  }
+}
+
 void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
@@ -107,6 +153,39 @@ void main() {
     );
   }
 
+  FileIndexResult buildDuplicateResult() {
+    return const FileIndexResult(
+      rootPath: r'C:\Docs\AS BUILT',
+      scannedDirectories: 2,
+      files: [
+        IndexedFile(
+          fileName: 'DNSSGM12000JCSS70001-0001.dwg',
+          directoryPath: r'C:\Docs\AS BUILT\DWG',
+          fullPath: r'C:\Docs\AS BUILT\DWG\DNSSGM12000JCSS70001-0001.dwg',
+          code: 'DNSSGM12000JCSS700',
+          documentTypeCode: 'JC',
+          sizeInBytes: 2048,
+        ),
+        IndexedFile(
+          fileName: 'DNSSGM12000JCSS70001-0001.pdf',
+          directoryPath: r'C:\Docs\AS BUILT\PDF',
+          fullPath: r'C:\Docs\AS BUILT\PDF\DNSSGM12000JCSS70001-0001.pdf',
+          code: 'DNSSGM12000JCSS700',
+          documentTypeCode: 'JC',
+          sizeInBytes: 4096,
+        ),
+        IndexedFile(
+          fileName: 'T2404.pdf',
+          directoryPath: r'C:\Docs\AS BUILT\T2404',
+          fullPath: r'C:\Docs\AS BUILT\T2404\T2404.pdf',
+          code: 'T2404',
+          documentTypeCode: '',
+          sizeInBytes: 1024,
+        ),
+      ],
+    );
+  }
+
   group('FileIndexerScreen widget tests', () {
     testWidgets('renders folder picker and empty state', (tester) async {
       tester.view.physicalSize = const Size(1600, 1000);
@@ -121,6 +200,8 @@ void main() {
       expect(find.text('Browse Folder'), findsOneWidget);
       expect(find.text('Index Folder'), findsOneWidget);
       expect(find.text('Include subfolders'), findsOneWidget);
+      expect(find.text('Copy duplicate document codes'), findsOneWidget);
+      expect(find.text('Duplicate Codes Destination'), findsNothing);
       expect(find.text('No folder indexed yet'), findsOneWidget);
 
       final exportButton = tester.widget<OutlinedButton>(
@@ -290,6 +371,98 @@ void main() {
         find.descendant(of: table, matching: find.text('1')),
         findsNothing,
       );
+    });
+
+    testWidgets('duplicate copy controls appear only when the switch is on', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1600, 1000);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      final service = _FakeCopyService(buildDuplicateResult());
+
+      await tester.pumpWidget(
+        buildTestableWidget(
+          FileIndexerScreen(
+            indexService: service,
+            initialFolderPath: r'C:\Docs\AS BUILT',
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Index Folder'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Duplicate Codes Destination'), findsNothing);
+
+      await tester.tap(find.byType(Switch).last);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Duplicate Codes Destination'), findsOneWidget);
+
+      final destinationField = tester.widget<TextField>(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is TextField &&
+              widget.decoration?.labelText == 'Duplicate Codes Destination',
+        ),
+      );
+      expect(
+        destinationField.controller?.text,
+        equals(r'C:\Docs\AS BUILT - Duplicate Codes'),
+      );
+      expect(find.text('Copy Duplicates (1)'), findsOneWidget);
+      expect(
+        find.textContaining('1 document code(s) shared by 2 files'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('copies duplicate codes to the selected destination', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1600, 1000);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      final service = _FakeCopyService(buildDuplicateResult());
+
+      await tester.pumpWidget(
+        buildTestableWidget(
+          FileIndexerScreen(
+            indexService: service,
+            initialFolderPath: r'C:\Docs\AS BUILT',
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Index Folder'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byType(Switch).last);
+      await tester.pumpAndSettle();
+
+      final destinationField = find.byWidgetPredicate(
+        (widget) =>
+            widget is TextField &&
+            widget.decoration?.labelText == 'Duplicate Codes Destination',
+      );
+
+      await tester.enterText(destinationField, r'D:\Duplicate Codes');
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Copy Duplicates (1)'));
+      await tester.pumpAndSettle();
+
+      expect(service.copiedDestination, equals(r'D:\Duplicate Codes'));
+      expect(
+        find.textContaining('Duplicate copy: 2 file(s) into 1 code folder(s)'),
+        findsOneWidget,
+      );
+      expect(find.text(r'D:\Duplicate Codes'), findsNWidgets(2));
     });
 
     testWidgets('opens from the configuration screen', (tester) async {

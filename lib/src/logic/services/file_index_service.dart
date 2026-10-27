@@ -5,6 +5,7 @@ import 'dart:isolate';
 import 'package:path/path.dart' as p;
 
 import '../../../core/logging/app_logger.dart';
+import '../../data/models/duplicate_code_group.dart';
 import '../../data/models/indexed_file.dart';
 
 /// Outcome of indexing a folder tree.
@@ -58,6 +59,75 @@ class FileIndexResult {
           ..sort();
     return values;
   }
+
+  /// Document codes shared by two or more files, sorted by code.
+  ///
+  /// Only complete 18-character codes qualify, so short names such as `T2404`
+  /// are never mistaken for duplicate documents.
+  List<DuplicateCodeGroup> get duplicateCodeGroups =>
+      DuplicateCodeGroup.fromFiles(files);
+
+  /// Total number of files that belong to a [duplicateCodeGroups] entry.
+  int get duplicateFileCount =>
+      duplicateCodeGroups.fold(0, (sum, group) => sum + group.fileCount);
+}
+
+/// Outcome of copying indexed files into a destination, either duplicate-code
+/// groups only or every file sorted by document code.
+class DuplicateCopyResult {
+  /// Folder that receives the no-code files when [copyFilesByCode] is used.
+  static const String noCodeFolderName = 'no_code';
+
+  /// Root folder that received the per-code folders.
+  final String destinationRoot;
+
+  /// Complete document codes shared by two or more files, sorted by code.
+  final List<DuplicateCodeGroup> groups;
+
+  /// Destination paths of the files that were copied during this run.
+  final List<String> copiedFiles;
+
+  /// Unique-code files that were copied directly into [destinationRoot].
+  final List<String> looseFiles;
+
+  /// Destination paths of the files copied into
+  /// `<destinationRoot>/[noCodeFolderName]` because their names are shorter
+  /// than a complete document code.
+  final List<String> noCodeFiles;
+
+  /// Files that were already present and identical, and therefore skipped.
+  final List<String> skippedFiles;
+
+  /// Codes or files that could not be copied.
+  final List<String> warnings;
+
+  const DuplicateCopyResult({
+    required this.destinationRoot,
+    required this.groups,
+    this.copiedFiles = const [],
+    this.looseFiles = const [],
+    this.noCodeFiles = const [],
+    this.skippedFiles = const [],
+    this.warnings = const [],
+  });
+
+  /// Number of code folders that were created.
+  int get totalGroups => groups.length;
+
+  /// Number of files written during this run.
+  int get totalCopied => copiedFiles.length;
+
+  /// Number of unique-code files copied straight into [destinationRoot].
+  int get totalLoose => looseFiles.length;
+
+  /// Number of files copied into the no-code folder.
+  int get totalNoCode => noCodeFiles.length;
+
+  /// Number of files that were already up to date.
+  int get totalSkipped => skippedFiles.length;
+
+  /// Whether any code or file could not be copied.
+  bool get hasWarnings => warnings.isNotEmpty;
 }
 
 /// Recursively indexes every file below a folder and exports the result as CSV.
@@ -361,6 +431,370 @@ class FileIndexService {
       );
       rethrow;
     }
+  }
+
+  /// Copies every file whose document code is shared with at least one other
+  /// file into `<destinationRoot>/<document code>/`.
+  ///
+  /// This is the "bundle companions" workflow: revisions and formats of the
+  /// same document end up side by side in a folder named after their common
+  /// 18-character code. Source files are never moved or deleted.
+  ///
+  /// Existing files are not overwritten by default. Re-running the copy is
+  /// idempotent: a destination file with the same size as its source is
+  /// considered already copied, and files with clashing names inside a code
+  /// folder are suffixed with ` (2)`, ` (3)`, and so on.
+  ///
+  /// [requireCompleteCode] keeps short file names from being grouped.
+  Future<DuplicateCopyResult> copyDuplicateCodeGroups(
+    List<IndexedFile> files, {
+    required String destinationRoot,
+    bool overwrite = false,
+    bool requireCompleteCode = true,
+  }) async {
+    final trimmedRoot = destinationRoot.trim();
+    if (trimmedRoot.isEmpty) {
+      throw ArgumentError.value(
+        destinationRoot,
+        'destinationRoot',
+        'must not be empty',
+      );
+    }
+
+    final groups = DuplicateCodeGroup.fromFiles(
+      files,
+      requireCompleteCode: requireCompleteCode,
+    );
+    final destination = p.normalize(p.absolute(trimmedRoot));
+    final fileCount = groups.fold(0, (sum, group) => sum + group.fileCount);
+
+    _log.i(
+      'Copying ${groups.length} duplicate document-code group(s) '
+      '($fileCount file(s)) to "$destination" (overwrite=$overwrite).',
+    );
+
+    final copied = <String>[];
+    final skipped = <String>[];
+    final warnings = <String>[];
+    final reservedNames = <String, Set<String>>{};
+
+    for (final group in groups) {
+      final folderName = _sanitizeFolderName(group.code);
+      if (folderName.isEmpty) {
+        warnings.add(
+          'Skipped document code "${group.code}": it has no usable folder name.',
+        );
+        continue;
+      }
+
+      final groupRoot = p.join(destination, folderName);
+      final reserved = reservedNames.putIfAbsent(
+        folderName.toLowerCase(),
+        () => <String>{},
+      );
+
+      if (!await _ensureDirectory(groupRoot, warnings)) continue;
+
+      for (final file in group.files) {
+        final target = await _copyInto(
+          file: file,
+          targetDirectory: groupRoot,
+          overwrite: overwrite,
+          reservedNames: reserved,
+          skipped: skipped,
+          warnings: warnings,
+        );
+        if (target != null) copied.add(target);
+      }
+    }
+
+    _log.i(
+      'Duplicate copy finished: ${copied.length} copied, '
+      '${skipped.length} already up to date, ${warnings.length} warning(s), '
+      'destination "$destination".',
+    );
+
+    return DuplicateCopyResult(
+      destinationRoot: destination,
+      groups: groups,
+      copiedFiles: copied,
+      skippedFiles: skipped,
+      warnings: warnings,
+    );
+  }
+
+  /// Copies every indexed file into [destinationRoot], sorted by document code:
+  ///
+  /// * a complete 18-character code shared by two or more files gets its own
+  ///   folder: `<destinationRoot>/<document code>/`;
+  /// * a complete code that belongs to a single file is copied directly into
+  ///   [destinationRoot] without a folder of its own;
+  /// * files whose names are shorter than a complete code go into
+  ///   `<destinationRoot>/no_code/`.
+  ///
+  /// Sources are copied, never moved or deleted. Existing destination files are
+  /// kept unless [overwrite] is true, and re-running the copy is idempotent.
+  Future<DuplicateCopyResult> copyFilesByCode(
+    List<IndexedFile> files, {
+    required String destinationRoot,
+    bool overwrite = false,
+  }) async {
+    final trimmedRoot = destinationRoot.trim();
+    if (trimmedRoot.isEmpty) {
+      throw ArgumentError.value(
+        destinationRoot,
+        'destinationRoot',
+        'must not be empty',
+      );
+    }
+
+    final destination = p.normalize(p.absolute(trimmedRoot));
+    final groups = DuplicateCodeGroup.fromFiles(files);
+    final sharedCodes = {for (final group in groups) group.code};
+
+    final looseSources = <IndexedFile>[];
+    final noCodeSources = <IndexedFile>[];
+
+    for (final file in files) {
+      if (file.hasCompleteCode && sharedCodes.contains(file.code)) continue;
+      if (file.hasCompleteCode) {
+        looseSources.add(file);
+      } else {
+        noCodeSources.add(file);
+      }
+    }
+
+    _log.i(
+      'Copying ${files.length} file(s) by document code to "$destination": '
+      '${groups.length} shared code folder(s), ${looseSources.length} unique '
+      'file(s), ${noCodeSources.length} no-code file(s) '
+      '(overwrite=$overwrite).',
+    );
+
+    final copied = <String>[];
+    final loose = <String>[];
+    final noCode = <String>[];
+    final skipped = <String>[];
+    final warnings = <String>[];
+    final reservedNames = <String, Set<String>>{};
+
+    // Shared codes first so their folders exist before loose files land in the
+    // destination root and cannot collide with a folder name.
+    for (final group in groups) {
+      final folderName = _sanitizeFolderName(group.code);
+      if (folderName.isEmpty) {
+        warnings.add(
+          'Skipped document code "${group.code}": it has no usable folder name.',
+        );
+        continue;
+      }
+
+      final groupRoot = p.join(destination, folderName);
+      final reserved = reservedNames.putIfAbsent(
+        folderName.toLowerCase(),
+        () => <String>{},
+      );
+
+      if (!await _ensureDirectory(groupRoot, warnings)) continue;
+
+      for (final file in group.files) {
+        final target = await _copyInto(
+          file: file,
+          targetDirectory: groupRoot,
+          overwrite: overwrite,
+          reservedNames: reserved,
+          skipped: skipped,
+          warnings: warnings,
+        );
+        if (target != null) copied.add(target);
+      }
+    }
+
+    if (looseSources.isNotEmpty &&
+        await _ensureDirectory(destination, warnings)) {
+      final reserved = reservedNames.putIfAbsent('__root__', () => <String>{});
+
+      for (final file in looseSources) {
+        final target = await _copyInto(
+          file: file,
+          targetDirectory: destination,
+          overwrite: overwrite,
+          reservedNames: reserved,
+          skipped: skipped,
+          warnings: warnings,
+        );
+        if (target != null) {
+          copied.add(target);
+          loose.add(target);
+        }
+      }
+    }
+
+    if (noCodeSources.isNotEmpty) {
+      final noCodeRoot = p.join(
+        destination,
+        DuplicateCopyResult.noCodeFolderName,
+      );
+
+      if (await _ensureDirectory(noCodeRoot, warnings)) {
+        final reserved = reservedNames.putIfAbsent(
+          DuplicateCopyResult.noCodeFolderName.toLowerCase(),
+          () => <String>{},
+        );
+
+        for (final file in noCodeSources) {
+          final target = await _copyInto(
+            file: file,
+            targetDirectory: noCodeRoot,
+            overwrite: overwrite,
+            reservedNames: reserved,
+            skipped: skipped,
+            warnings: warnings,
+          );
+          if (target != null) {
+            copied.add(target);
+            noCode.add(target);
+          }
+        }
+      }
+    }
+
+    _log.i(
+      'Copy-by-code finished: ${copied.length} copied '
+      '(${loose.length} loose, ${noCode.length} no-code), '
+      '${skipped.length} already up to date, ${warnings.length} warning(s), '
+      'destination "$destination".',
+    );
+
+    return DuplicateCopyResult(
+      destinationRoot: destination,
+      groups: groups,
+      copiedFiles: copied,
+      looseFiles: loose,
+      noCodeFiles: noCode,
+      skippedFiles: skipped,
+      warnings: warnings,
+    );
+  }
+
+  /// Copies [file] into [targetDirectory], recording skips and failures.
+  /// Returns the destination path, or `null` when nothing was written.
+  static Future<String?> _copyInto({
+    required IndexedFile file,
+    required String targetDirectory,
+    required bool overwrite,
+    required Set<String> reservedNames,
+    required List<String> skipped,
+    required List<String> warnings,
+  }) async {
+    final target = await _resolveCopyTarget(
+      targetDirectory,
+      file,
+      overwrite: overwrite,
+      reservedNames: reservedNames,
+    );
+
+    if (target == null) {
+      _log.t('Skipping already copied file: ${file.fullPath}');
+      skipped.add(file.fullPath);
+      return null;
+    }
+
+    try {
+      await File(file.fullPath).copy(target);
+      reservedNames.add(p.basename(target).toLowerCase());
+      _log.t('Copied "${file.fullPath}" -> "$target".');
+      return target;
+    } on FileSystemException catch (error) {
+      _log.w('Could not copy file: ${file.fullPath}', error: error);
+      warnings.add('Could not copy "${file.fullPath}": ${error.message}');
+      return null;
+    }
+  }
+
+  /// Creates [path] (and its parents), reporting failure through [warnings].
+  static Future<bool> _ensureDirectory(
+    String path,
+    List<String> warnings,
+  ) async {
+    try {
+      await Directory(path).create(recursive: true);
+      return true;
+    } on FileSystemException catch (error) {
+      _log.w('Could not create folder: $path', error: error);
+      warnings.add('Could not create folder "$path": ${error.message}');
+      return false;
+    }
+  }
+
+  /// Chooses the destination path for [file] inside [groupRoot], or `null` when
+  /// the file is already there (or is its own destination).
+  static Future<String?> _resolveCopyTarget(
+    String targetDirectory,
+    IndexedFile file, {
+    required bool overwrite,
+    required Set<String> reservedNames,
+  }) async {
+    final direct = p.join(targetDirectory, file.fileName);
+    if (p.equals(p.normalize(file.fullPath), p.normalize(direct))) {
+      return null;
+    }
+
+    final directName = p.basename(direct).toLowerCase();
+    final directFile = File(direct);
+    final directType = await FileSystemEntity.type(direct, followLinks: false);
+    final directExists = directType != FileSystemEntityType.notFound;
+    final directIsFile = directType == FileSystemEntityType.file;
+
+    if (!reservedNames.contains(directName) &&
+        (!directExists || (overwrite && directIsFile))) {
+      return direct;
+    }
+
+    if (directIsFile &&
+        !overwrite &&
+        await directFile.length() == file.sizeInBytes) {
+      return null;
+    }
+
+    final extension = p.extension(file.fileName);
+    final baseName = p.basenameWithoutExtension(file.fileName);
+    var counter = 2;
+
+    while (true) {
+      final candidateName = '$baseName ($counter)$extension';
+      final candidate = p.join(targetDirectory, candidateName);
+      final candidateFile = File(candidate);
+      final candidateType = await FileSystemEntity.type(
+        candidate,
+        followLinks: false,
+      );
+      final candidateExists = candidateType != FileSystemEntityType.notFound;
+      final candidateIsFile = candidateType == FileSystemEntityType.file;
+
+      if (!reservedNames.contains(candidateName.toLowerCase()) &&
+          (!candidateExists || (overwrite && candidateIsFile))) {
+        return candidate;
+      }
+
+      if (candidateIsFile &&
+          !overwrite &&
+          await candidateFile.length() == file.sizeInBytes) {
+        return null;
+      }
+
+      counter++;
+    }
+  }
+
+  /// Replaces characters that are illegal in a folder name on Windows.
+  static String _sanitizeFolderName(String value) {
+    final name = value.replaceAll(RegExp(r'[<>:"/\\|?*\x00-\x1F]'), '_').trim();
+    var trimmed = name;
+    while (trimmed.endsWith('.')) {
+      trimmed = trimmed.substring(0, trimmed.length - 1);
+    }
+    return trimmed;
   }
 
   /// Quotes a CSV field when it contains a comma, quote, CR or LF.

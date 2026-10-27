@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ft_file_sorter/src/data/models/duplicate_code_group.dart';
 import 'package:ft_file_sorter/src/data/models/indexed_file.dart';
 import 'package:ft_file_sorter/src/logic/services/file_index_service.dart';
 import 'package:path/path.dart' as p;
@@ -202,6 +203,350 @@ void main() {
       await expectLater(
         service.indexDirectory(p.join(tempDir.path, 'does-not-exist')),
         throwsA(isA<FileSystemException>()),
+      );
+    });
+  });
+
+  group('Duplicate document codes', () {
+    const service = FileIndexService();
+
+    const sharedCode = 'DNSSGM12000JCSS700';
+
+    IndexedFile fileAt(String path, {int size = 10}) =>
+        IndexedFile.fromPath(path, sizeInBytes: size);
+
+    test('groups only complete codes shared by two or more files', () {
+      final files = [
+        fileAt(r'C:\docs\DNSSGM12000JCSS70001-0001.dwg'),
+        fileAt(r'C:\docs\DNSSGM12000JCSS70001-0001.pdf'),
+        fileAt(r'C:\docs\T2404.pdf'),
+        fileAt(r'C:\docs\T2404.docx'),
+        fileAt(r'C:\docs\OTHER00000000000001-0001.pdf'),
+      ];
+
+      final groups = DuplicateCodeGroup.fromFiles(files);
+
+      expect(groups, hasLength(1));
+      expect(groups.single.code, equals(sharedCode));
+      expect(groups.single.fileCount, equals(2));
+      expect(groups.single.isDuplicate, isTrue);
+
+      final withShortCodes = DuplicateCodeGroup.fromFiles(
+        files,
+        requireCompleteCode: false,
+      );
+      expect(withShortCodes.map((group) => group.code), contains('T2404'));
+    });
+
+    test('exposes duplicate groups from a scan result', () async {
+      final tempDir = await Directory.systemTemp.createTemp('ft_dup_result_');
+      addTearDown(() async {
+        if (await tempDir.exists()) await tempDir.delete(recursive: true);
+      });
+
+      await File(
+        p.join(tempDir.path, 'DNSSGM12000JCSS70001-0001.dwg'),
+      ).writeAsString('drawing');
+      await File(
+        p.join(tempDir.path, 'DNSSGM12000JCSS70001-0001.pdf'),
+      ).writeAsString('pdf');
+      await File(p.join(tempDir.path, 'T2404.pdf')).writeAsString('x');
+
+      final result = await service.indexDirectory(tempDir.path);
+
+      expect(result.duplicateCodeGroups, hasLength(1));
+      expect(result.duplicateCodeGroups.single.code, equals(sharedCode));
+      expect(result.duplicateFileCount, equals(2));
+    });
+
+    test(
+      'copies each shared code into its own folder and keeps sources',
+      () async {
+        final tempDir = await Directory.systemTemp.createTemp('ft_dup_copy_');
+        addTearDown(() async {
+          if (await tempDir.exists()) await tempDir.delete(recursive: true);
+        });
+
+        final source = Directory(p.join(tempDir.path, 'source'))..createSync();
+        final drawing = File(
+          p.join(source.path, 'DNSSGM12000JCSS70001-0001.dwg'),
+        )..writeAsStringSync('dwg-content');
+        final pdf = File(p.join(source.path, 'DNSSGM12000JCSS70001-0001.pdf'))
+          ..writeAsStringSync('pdf');
+        final unique = File(p.join(source.path, 'T2404.pdf'))
+          ..writeAsStringSync('unique');
+
+        final indexed = await service.indexDirectory(source.path);
+        final destination = p.join(tempDir.path, 'duplicates');
+
+        final result = await service.copyDuplicateCodeGroups(
+          indexed.files,
+          destinationRoot: destination,
+        );
+
+        expect(result.totalGroups, equals(1));
+        expect(result.totalCopied, equals(2));
+        expect(result.totalSkipped, isZero);
+        expect(result.hasWarnings, isFalse);
+
+        final codeFolder = Directory(p.join(destination, sharedCode));
+        expect(codeFolder.existsSync(), isTrue);
+        expect(
+          codeFolder
+              .listSync()
+              .map((entity) => p.basename(entity.path))
+              .toSet(),
+          equals({
+            'DNSSGM12000JCSS70001-0001.dwg',
+            'DNSSGM12000JCSS70001-0001.pdf',
+          }),
+        );
+        expect(
+          File(
+            p.join(codeFolder.path, 'DNSSGM12000JCSS70001-0001.pdf'),
+          ).readAsStringSync(),
+          equals('pdf'),
+        );
+
+        // Sources are copied, never moved, and unrelated files are ignored.
+        expect(drawing.existsSync(), isTrue);
+        expect(pdf.existsSync(), isTrue);
+        expect(unique.existsSync(), isTrue);
+        expect(File(p.join(destination, 'T2404.pdf')).existsSync(), isFalse);
+      },
+    );
+
+    test('suffixes same-named files from different folders', () async {
+      final tempDir = await Directory.systemTemp.createTemp('ft_dup_names_');
+      addTearDown(() async {
+        if (await tempDir.exists()) await tempDir.delete(recursive: true);
+      });
+
+      final first = Directory(p.join(tempDir.path, 'a'))..createSync();
+      final second = Directory(p.join(tempDir.path, 'b'))..createSync();
+      File(
+        p.join(first.path, 'DNSSGM12000JCSS70001-0001.dwg'),
+      ).writeAsStringSync('first');
+      File(
+        p.join(second.path, 'DNSSGM12000JCSS70001-0001.dwg'),
+      ).writeAsStringSync('second-content');
+
+      final indexed = await service.indexDirectory(tempDir.path);
+      final destination = p.join(tempDir.path, 'out');
+
+      final result = await service.copyDuplicateCodeGroups(
+        indexed.files,
+        destinationRoot: destination,
+      );
+
+      expect(result.totalCopied, equals(2));
+
+      final names = Directory(
+        p.join(destination, sharedCode),
+      ).listSync().map((entity) => p.basename(entity.path)).toSet();
+      expect(
+        names,
+        equals({
+          'DNSSGM12000JCSS70001-0001.dwg',
+          'DNSSGM12000JCSS70001-0001 (2).dwg',
+        }),
+      );
+    });
+
+    test('re-running the copy does not duplicate or overwrite files', () async {
+      final tempDir = await Directory.systemTemp.createTemp('ft_dup_rerun_');
+      addTearDown(() async {
+        if (await tempDir.exists()) await tempDir.delete(recursive: true);
+      });
+
+      await File(
+        p.join(tempDir.path, 'DNSSGM12000JCSS70001-0001.dwg'),
+      ).writeAsString('dwg');
+      await File(
+        p.join(tempDir.path, 'DNSSGM12000JCSS70001-0001.pdf'),
+      ).writeAsString('pdf');
+
+      final indexed = await service.indexDirectory(tempDir.path);
+      final destination = p.join(tempDir.path, 'out');
+
+      await service.copyDuplicateCodeGroups(
+        indexed.files,
+        destinationRoot: destination,
+      );
+      final secondRun = await service.copyDuplicateCodeGroups(
+        indexed.files,
+        destinationRoot: destination,
+      );
+
+      expect(secondRun.totalCopied, isZero);
+      expect(secondRun.totalSkipped, equals(2));
+      expect(
+        Directory(p.join(destination, sharedCode)).listSync(),
+        hasLength(2),
+      );
+    });
+
+    test('does nothing when no code is shared', () async {
+      final tempDir = await Directory.systemTemp.createTemp('ft_dup_none_');
+      addTearDown(() async {
+        if (await tempDir.exists()) await tempDir.delete(recursive: true);
+      });
+
+      await File(p.join(tempDir.path, 'T2404.pdf')).writeAsString('x');
+
+      final indexed = await service.indexDirectory(tempDir.path);
+      final destination = p.join(tempDir.path, 'out');
+
+      final result = await service.copyDuplicateCodeGroups(
+        indexed.files,
+        destinationRoot: destination,
+      );
+
+      expect(result.totalGroups, isZero);
+      expect(result.totalCopied, isZero);
+      expect(Directory(destination).existsSync(), isFalse);
+    });
+
+    test('rejects an empty destination', () async {
+      await expectLater(
+        service.copyDuplicateCodeGroups(const [], destinationRoot: '   '),
+        throwsArgumentError,
+      );
+    });
+  });
+
+  group('Copy files by code', () {
+    const service = FileIndexService();
+    const sharedCode = 'DNSSGM12000JCSS700';
+    const uniqueCode = 'DNSSGH13900JACD001';
+    const noCodeFolder = DuplicateCopyResult.noCodeFolderName;
+
+    late Directory tempDir;
+
+    setUp(() async {
+      tempDir = await Directory.systemTemp.createTemp('ft_copy_by_code_');
+    });
+
+    tearDown(() async {
+      if (await tempDir.exists()) {
+        await tempDir.delete(recursive: true);
+      }
+    });
+
+    test(
+      'folders shared codes, copies unique codes loose and uses no_code',
+      () async {
+        await File(
+          p.join(tempDir.path, 'DNSSGM12000JCSS70001-0001.dwg'),
+        ).writeAsString('dwg');
+        await File(
+          p.join(tempDir.path, 'DNSSGM12000JCSS70001-0001.pdf'),
+        ).writeAsString('pdf');
+        await File(
+          p.join(tempDir.path, 'DNSSGH13900JACD00100-0001.pdf'),
+        ).writeAsString('unique');
+        await File(p.join(tempDir.path, 'T2404.pdf')).writeAsString('short');
+
+        final indexed = await service.indexDirectory(tempDir.path);
+        final destination = p.join(tempDir.path, 'sorted');
+
+        final result = await service.copyFilesByCode(
+          indexed.files,
+          destinationRoot: destination,
+        );
+
+        expect(result.totalGroups, equals(1));
+        expect(result.groups.single.code, equals(sharedCode));
+        expect(result.totalCopied, equals(4));
+        expect(result.totalLoose, equals(1));
+        expect(result.totalNoCode, equals(1));
+        expect(result.hasWarnings, isFalse);
+
+        // Shared code gets a folder with both companions.
+        final sharedFolder = Directory(p.join(destination, sharedCode));
+        expect(sharedFolder.existsSync(), isTrue);
+        expect(
+          sharedFolder.listSync().map((e) => p.basename(e.path)).toSet(),
+          equals({
+            'DNSSGM12000JCSS70001-0001.dwg',
+            'DNSSGM12000JCSS70001-0001.pdf',
+          }),
+        );
+
+        // A code that occurs once is written directly into the destination.
+        expect(
+          File(
+            p.join(destination, 'DNSSGH13900JACD00100-0001.pdf'),
+          ).existsSync(),
+          isTrue,
+        );
+        expect(
+          Directory(p.join(destination, uniqueCode)).existsSync(),
+          isFalse,
+        );
+
+        // Short names go to the dedicated no_code folder.
+        final noCodeFile = File(p.join(destination, noCodeFolder, 'T2404.pdf'));
+        expect(noCodeFile.existsSync(), isTrue);
+        expect(noCodeFile.readAsStringSync(), equals('short'));
+
+        // Sources are untouched.
+        expect(File(p.join(tempDir.path, 'T2404.pdf')).existsSync(), isTrue);
+        expect(
+          File(
+            p.join(tempDir.path, 'DNSSGM12000JCSS70001-0001.dwg'),
+          ).existsSync(),
+          isTrue,
+        );
+      },
+    );
+
+    test('is idempotent and keeps same-named short files apart', () async {
+      final nested = Directory(p.join(tempDir.path, 'nested'))..createSync();
+      await File(
+        p.join(tempDir.path, 'DNSSGM12000JCSS70001-0001.dwg'),
+      ).writeAsString('dwg');
+      await File(
+        p.join(tempDir.path, 'DNSSGM12000JCSS70001-0001.pdf'),
+      ).writeAsString('pdf');
+      await File(
+        p.join(tempDir.path, 'DNSSGH13900JACD00100-0001.pdf'),
+      ).writeAsString('unique');
+      await File(p.join(tempDir.path, 'T2404.pdf')).writeAsString('short');
+      await File(p.join(nested.path, 'T2404.pdf')).writeAsString('short-two');
+
+      final indexed = await service.indexDirectory(tempDir.path);
+      final destination = p.join(tempDir.path, 'sorted');
+
+      final firstRun = await service.copyFilesByCode(
+        indexed.files,
+        destinationRoot: destination,
+      );
+      expect(firstRun.totalCopied, equals(5));
+
+      final secondRun = await service.copyFilesByCode(
+        indexed.files,
+        destinationRoot: destination,
+      );
+      expect(secondRun.totalCopied, isZero);
+      expect(secondRun.totalSkipped, equals(5));
+
+      expect(
+        Directory(
+          p.join(destination, noCodeFolder),
+        ).listSync().map((e) => p.basename(e.path)).toSet(),
+        equals({'T2404.pdf', 'T2404 (2).pdf'}),
+      );
+      expect(
+        Directory(p.join(destination, sharedCode)).listSync(),
+        hasLength(2),
+      );
+    });
+
+    test('rejects an empty destination', () async {
+      await expectLater(
+        service.copyFilesByCode(const [], destinationRoot: ' '),
+        throwsArgumentError,
       );
     });
   });

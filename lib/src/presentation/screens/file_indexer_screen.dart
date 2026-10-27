@@ -1,9 +1,11 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:path/path.dart' as p;
 
 import '../../../core/logging/app_logger.dart';
 import '../../../core/theme/widgets/animated_theme_toggle.dart';
 import '../../data/models/document_type_info.dart';
+import '../../data/models/duplicate_code_group.dart';
 import '../../data/models/indexed_file.dart';
 import '../../logic/services/file_index_service.dart';
 import '../navigation/app_navigation_drawer.dart';
@@ -40,15 +42,20 @@ class _FileIndexerScreenState extends State<FileIndexerScreen> {
 
   final TextEditingController _folderController = TextEditingController();
   final TextEditingController _searchController = TextEditingController();
+  final TextEditingController _duplicateDestinationController =
+      TextEditingController();
   final ScrollController _tableScrollController = ScrollController();
 
   bool _recursive = true;
+  bool _copyDuplicates = false;
   bool _isScanning = false;
   bool _isExporting = false;
+  bool _isCopying = false;
   String? _errorMessage;
   String _typeFilter = _allTypesFilter;
   int _page = 0;
   FileIndexResult? _result;
+  DuplicateCopyResult? _copyResult;
 
   /// 1-based position of each file in the full sorted result. Shared with the
   /// CSV export so table rows and exported rows carry the same index.
@@ -75,6 +82,7 @@ class _FileIndexerScreenState extends State<FileIndexerScreen> {
     _searchController.removeListener(_onSearchChanged);
     _folderController.dispose();
     _searchController.dispose();
+    _duplicateDestinationController.dispose();
     _tableScrollController.dispose();
     super.dispose();
   }
@@ -188,9 +196,14 @@ class _FileIndexerScreenState extends State<FileIndexerScreen> {
         };
         _isScanning = false;
         _errorMessage = null;
+        _copyResult = null;
         _typeFilter = _allTypesFilter;
         _page = 0;
       });
+
+      if (_copyDuplicates) {
+        setState(_suggestDuplicateDestination);
+      }
 
       if (result.files.isEmpty) {
         _log.w('Scan completed but no files were found in "$path".');
@@ -207,6 +220,7 @@ class _FileIndexerScreenState extends State<FileIndexerScreen> {
       setState(() {
         _isScanning = false;
         _result = null;
+        _copyResult = null;
         _errorMessage = 'Could not index "$path": $error';
       });
     }
@@ -270,6 +284,128 @@ class _FileIndexerScreenState extends State<FileIndexerScreen> {
     } finally {
       if (mounted) {
         setState(() => _isExporting = false);
+      }
+    }
+  }
+
+  /// Picks the folder that receives the per-document-code subfolders.
+  Future<void> _pickDuplicateDestination() async {
+    _log.d('Opening the duplicate destination picker.');
+
+    try {
+      final directoryPath = await FilePicker.platform.getDirectoryPath(
+        dialogTitle: 'Select Destination for Duplicate Document Codes',
+      );
+
+      if (directoryPath == null || directoryPath.isEmpty) {
+        _log.d('Duplicate destination picker was cancelled.');
+        return;
+      }
+
+      _log.i('Duplicate destination selected: "$directoryPath".');
+      setState(() => _duplicateDestinationController.text = directoryPath);
+    } catch (error, stackTrace) {
+      _log.e(
+        'Duplicate destination picker failed.',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      _showSnackBar('Failed to pick a destination: $error', isError: true);
+    }
+  }
+
+  /// Suggests a sibling folder next to the indexed root when the destination
+  /// is still empty. A sibling avoids re-indexing the copied files later.
+  void _suggestDuplicateDestination() {
+    if (_duplicateDestinationController.text.trim().isNotEmpty) return;
+
+    final source = _result?.rootPath ?? _folderController.text.trim();
+    if (source.isEmpty) return;
+
+    final normalized = p.normalize(source);
+    final parent = p.dirname(normalized);
+    final name = p.basename(normalized);
+
+    _duplicateDestinationController.text =
+        (name.isEmpty || parent == normalized)
+        ? p.join(normalized, 'Duplicate Codes')
+        : p.join(parent, '$name - Duplicate Codes');
+  }
+
+  Future<void> _copyDuplicateCodes() async {
+    final result = _result;
+    if (result == null || _isCopying) {
+      _log.d('Ignoring duplicate copy request (no index or copy running).');
+      return;
+    }
+
+    final destination = _duplicateDestinationController.text.trim();
+    if (destination.isEmpty) {
+      _log.w('Duplicate copy requested without a destination folder.');
+      _showSnackBar('Choose a destination folder for the duplicate codes.');
+      return;
+    }
+
+    final groups = result.duplicateCodeGroups;
+    if (groups.isEmpty) {
+      _log.d('Duplicate copy requested but no duplicate codes were found.');
+      _showSnackBar('No duplicate document codes were found in this index.');
+      return;
+    }
+
+    _log.i(
+      'Duplicate copy requested: ${groups.length} code(s), '
+      '${result.duplicateFileCount} file(s) -> "$destination".',
+    );
+    final stopwatch = Stopwatch()..start();
+
+    setState(() {
+      _isCopying = true;
+      _copyResult = null;
+    });
+
+    try {
+      final copyResult = await widget.indexService.copyDuplicateCodeGroups(
+        result.files,
+        destinationRoot: destination,
+      );
+
+      stopwatch.stop();
+
+      if (!mounted) {
+        _log.d('Screen was disposed before the duplicate copy finished.');
+        return;
+      }
+
+      _log.i(
+        'Duplicate copy applied: ${copyResult.totalCopied} copied, '
+        '${copyResult.totalSkipped} skipped, '
+        '${copyResult.warnings.length} warning(s) in '
+        '${stopwatch.elapsedMilliseconds} ms.',
+      );
+
+      setState(() => _copyResult = copyResult);
+
+      _showSnackBar(
+        copyResult.hasWarnings && copyResult.totalCopied == 0
+            ? 'Duplicate copy failed: ${copyResult.warnings.length} item(s) '
+                  'could not be copied.'
+            : 'Copied ${copyResult.totalCopied} file(s) into '
+                  '${copyResult.totalGroups} document-code folder(s).',
+        isError: copyResult.hasWarnings && copyResult.totalCopied == 0,
+      );
+    } catch (error, stackTrace) {
+      stopwatch.stop();
+      _log.e(
+        'Duplicate copy failed after ${stopwatch.elapsedMilliseconds} ms.',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      if (!mounted) return;
+      _showSnackBar('Failed to copy duplicate codes: $error', isError: true);
+    } finally {
+      if (mounted) {
+        setState(() => _isCopying = false);
       }
     }
   }
@@ -348,6 +484,10 @@ class _FileIndexerScreenState extends State<FileIndexerScreen> {
                     _result!.warnings.isNotEmpty) ...[
                   const SizedBox(height: 16),
                   _buildWarningsCard(colorScheme),
+                ],
+                if (_copyResult != null) ...[
+                  const SizedBox(height: 16),
+                  _buildCopySummaryCard(colorScheme),
                 ],
                 const SizedBox(height: 16),
                 Expanded(child: _buildBody(colorScheme)),
@@ -470,18 +610,62 @@ class _FileIndexerScreenState extends State<FileIndexerScreen> {
             const SizedBox(height: 8),
             Row(
               children: [
-                Switch(
-                  value: _recursive,
-                  onChanged: _isScanning
-                      ? null
-                      : (value) {
-                          _log.d('Include subfolders changed to $value.');
-                          setState(() => _recursive = value);
-                        },
+                Expanded(
+                  child: Wrap(
+                    spacing: 20,
+                    runSpacing: 4,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Switch(
+                            value: _recursive,
+                            onChanged: _isScanning
+                                ? null
+                                : (value) {
+                                    _log.d(
+                                      'Include subfolders changed to $value.',
+                                    );
+                                    setState(() => _recursive = value);
+                                  },
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Include subfolders',
+                            style: theme.textTheme.bodyMedium,
+                          ),
+                        ],
+                      ),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Switch(
+                            value: _copyDuplicates,
+                            onChanged: _isScanning || _isCopying
+                                ? null
+                                : (value) {
+                                    _log.d(
+                                      'Copy duplicate document codes changed '
+                                      'to $value.',
+                                    );
+                                    setState(() {
+                                      _copyDuplicates = value;
+                                      if (value) _suggestDuplicateDestination();
+                                    });
+                                  },
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Copy duplicate document codes',
+                            style: theme.textTheme.bodyMedium,
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
-                const SizedBox(width: 4),
-                Text('Include subfolders', style: theme.textTheme.bodyMedium),
-                const Spacer(),
+                const SizedBox(width: 12),
                 OutlinedButton.icon(
                   onPressed:
                       (_result == null ||
@@ -506,8 +690,188 @@ class _FileIndexerScreenState extends State<FileIndexerScreen> {
                 ),
               ],
             ),
+            if (_copyDuplicates) ...[
+              const SizedBox(height: 12),
+              _buildDuplicateCopyControls(colorScheme, theme),
+            ],
           ],
         ),
+      ),
+    );
+  }
+
+  /// Destination picker and copy trigger, shown when the duplicate-code switch
+  /// is on.
+  Widget _buildDuplicateCopyControls(ColorScheme colorScheme, ThemeData theme) {
+    final result = _result;
+    final groups = result?.duplicateCodeGroups ?? const <DuplicateCodeGroup>[];
+    final hasDestination = _duplicateDestinationController.text
+        .trim()
+        .isNotEmpty;
+    final canCopy =
+        result != null &&
+        groups.isNotEmpty &&
+        hasDestination &&
+        !_isScanning &&
+        !_isCopying;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _duplicateDestinationController,
+                enabled: !_isScanning && !_isCopying,
+                decoration: InputDecoration(
+                  labelText: 'Duplicate Codes Destination',
+                  hintText: r'e.g. D:\Documents\Duplicate Codes',
+                  helperText:
+                      'Use a folder outside the indexed tree so the copies '
+                      'are not indexed again.',
+                  prefixIcon: const Icon(Icons.outbox_outlined),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 14,
+                  ),
+                ),
+                onChanged: (_) => setState(() {}),
+              ),
+            ),
+            const SizedBox(width: 12),
+            SizedBox(
+              height: 48,
+              child: FilledButton.tonalIcon(
+                onPressed: _isScanning || _isCopying
+                    ? null
+                    : _pickDuplicateDestination,
+                icon: const Icon(Icons.folder_open),
+                label: const Text('Browse'),
+                style: FilledButton.styleFrom(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            SizedBox(
+              height: 48,
+              child: FilledButton.icon(
+                onPressed: canCopy ? _copyDuplicateCodes : null,
+                icon: _isCopying
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.content_copy_outlined),
+                label: Text(
+                  _isCopying
+                      ? 'Copying...'
+                      : 'Copy Duplicates${groups.isEmpty ? '' : ' (${groups.length})'}',
+                ),
+                style: FilledButton.styleFrom(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Text(
+          groups.isEmpty
+              ? (result == null
+                    ? 'Index a folder to detect document codes shared by '
+                          'several files.'
+                    : 'No document codes are shared by more than one file.')
+              : '${groups.length} document code(s) shared by '
+                    '${result!.duplicateFileCount} files. Each code gets its '
+                    'own folder; source files are copied, never moved.',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCopySummaryCard(ColorScheme colorScheme) {
+    final copyResult = _copyResult!;
+    final hasWarnings = copyResult.hasWarnings;
+
+    return Card(
+      elevation: 0,
+      color: hasWarnings
+          ? colorScheme.tertiaryContainer
+          : colorScheme.secondaryContainer,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: ExpansionTile(
+        initiallyExpanded: hasWarnings,
+        leading: Icon(
+          hasWarnings
+              ? Icons.warning_amber_outlined
+              : Icons.check_circle_outline,
+          color: hasWarnings
+              ? colorScheme.onTertiaryContainer
+              : colorScheme.onSecondaryContainer,
+        ),
+        title: Text(
+          'Duplicate copy: ${copyResult.totalCopied} file(s) into '
+          '${copyResult.totalGroups} code folder(s)',
+          style: TextStyle(
+            color: hasWarnings
+                ? colorScheme.onTertiaryContainer
+                : colorScheme.onSecondaryContainer,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        subtitle: Text(
+          copyResult.destinationRoot,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: hasWarnings
+                ? colorScheme.onTertiaryContainer
+                : colorScheme.onSecondaryContainer,
+          ),
+        ),
+        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+        children: [
+          if (copyResult.totalSkipped > 0)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                '${copyResult.totalSkipped} file(s) were already up to date.',
+                style: TextStyle(
+                  color: hasWarnings
+                      ? colorScheme.onTertiaryContainer
+                      : colorScheme.onSecondaryContainer,
+                ),
+              ),
+            ),
+          for (final warning in copyResult.warnings.take(10))
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  warning,
+                  style: TextStyle(
+                    color: hasWarnings
+                        ? colorScheme.onTertiaryContainer
+                        : colorScheme.onSecondaryContainer,
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
