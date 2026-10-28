@@ -1,6 +1,10 @@
 # Miscellaneous
 *.class
 *.lock
+# Keep the application's resolved dependency versions under version control
+# so CI builds match local builds (otherwise ^constraints float to new
+# releases, e.g. adaptive_theme 3.8.0 requiring material_ui).
+!pubspec.lock
 *.log
 *.pyc
 *.swp
