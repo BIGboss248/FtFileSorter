@@ -73,15 +73,20 @@ class _CallbackIndexService extends FileIndexService {
 /// Records the destination of a duplicate-code copy and returns a synthetic
 /// result so widget tests never touch the file system.
 class _FakeCopyService extends FileIndexService {
-  _FakeCopyService(this.result, {this.trashResult});
+  _FakeCopyService(this.result, {this.trashResult, this.flattenResult});
 
   final FileIndexResult result;
 
   /// Synthetic cleanup result returned by [moveDisallowedFiles]. When `null`
   /// the fake reports an empty trash, keeping tests hermetic.
   final TrashResult? trashResult;
+
+  /// Synthetic flatten result returned by [flattenSingleFileFolders]. When
+  /// `null` the fake reports nothing flattened.
+  final FlattenResult? flattenResult;
   String? copiedDestination;
   bool? copiedOverwrite;
+  String? flattenedDestination;
 
   @override
   Future<FileIndexResult> indexDirectory(
@@ -130,6 +135,14 @@ class _FakeCopyService extends FileIndexService {
           destinationRoot: destinationRoot,
           trashRoot: p.join(destinationRoot, 'trash'),
         );
+  }
+
+  @override
+  Future<FlattenResult> flattenSingleFileFolders({
+    required String destinationRoot,
+  }) async {
+    flattenedDestination = destinationRoot;
+    return flattenResult ?? FlattenResult(destinationRoot: destinationRoot);
   }
 }
 
@@ -492,7 +505,9 @@ void main() {
       expect(find.text(r'D:\Duplicate Codes'), findsNWidgets(2));
     });
 
-    testWidgets('moves disallowed files to trash after copying', (tester) async {
+    testWidgets('moves disallowed files to trash after copying', (
+      tester,
+    ) async {
       tester.view.physicalSize = const Size(1600, 1000);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
@@ -516,7 +531,7 @@ void main() {
         movedTo: {
           r'C:\Docs\AS BUILT\DWG\DNSSGM12000JCSS70001-0001.dwg':
               r'D:\Duplicate Codes\trash\DNSSGM12000JCSS700'
-                  r'\DNSSGM12000JCSS70001-0001.dwg',
+              r'\DNSSGM12000JCSS70001-0001.dwg',
         },
       );
 
@@ -559,6 +574,137 @@ void main() {
         findsOneWidget,
       );
       expect(find.textContaining('Moved 1 to trash'), findsOneWidget);
+    });
+
+    testWidgets('flatten switch defaults on', (tester) async {
+      tester.view.physicalSize = const Size(1600, 1000);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      final service = _FakeCopyService(buildDuplicateResult());
+
+      await tester.pumpWidget(
+        buildTestableWidget(
+          FileIndexerScreen(
+            indexService: service,
+            initialFolderPath: r'C:\Docs\AS BUILT',
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Index Folder'));
+      await tester.pumpAndSettle();
+
+      final flattenSwitch = find.byKey(
+        const Key('flatten-single-file-folders-switch'),
+      );
+      expect(flattenSwitch, findsOneWidget);
+      expect(tester.widget<Switch>(flattenSwitch).value, isTrue);
+      expect(find.text('Flatten single-file folders'), findsOneWidget);
+    });
+
+    testWidgets('flattens single-file folders after copying', (tester) async {
+      tester.view.physicalSize = const Size(1600, 1100);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      const flattenResult = FlattenResult(
+        destinationRoot: r'D:\Duplicate Codes',
+        movedTo: {
+          r'D:\Duplicate Codes\DNSSGM12000JCSS700\DNSSGM12000JCSS70001-0001.pdf':
+              r'D:\Duplicate Codes\DNSSGM12000JCSS70001-0001.pdf',
+        },
+        removedFolders: [r'D:\Duplicate Codes\DNSSGM12000JCSS700'],
+      );
+
+      final service = _FakeCopyService(
+        buildDuplicateResult(),
+        flattenResult: flattenResult,
+      );
+
+      await tester.pumpWidget(
+        buildTestableWidget(
+          FileIndexerScreen(
+            indexService: service,
+            rulesService: AllowedTypesRulesService(
+              filePath: p.join(Directory.systemTemp.path, 'ft_no_rules.json'),
+            ),
+            initialFolderPath: r'C:\Docs\AS BUILT',
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Index Folder'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byType(Switch).last);
+      await tester.pumpAndSettle();
+
+      final destinationField = find.byWidgetPredicate(
+        (widget) =>
+            widget is TextField &&
+            widget.decoration?.labelText == 'Duplicate Codes Destination',
+      );
+      await tester.enterText(destinationField, r'D:\Duplicate Codes');
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Copy Duplicates (1)'));
+      await tester.pumpAndSettle();
+
+      expect(service.flattenedDestination, equals(r'D:\Duplicate Codes'));
+      expect(find.textContaining('Flatten: 1 file(s) moved'), findsOneWidget);
+      expect(find.textContaining('Flattened 1 folder(s).'), findsOneWidget);
+    });
+
+    testWidgets('skips flattening when the switch is off', (tester) async {
+      tester.view.physicalSize = const Size(1600, 1000);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      final service = _FakeCopyService(buildDuplicateResult());
+
+      await tester.pumpWidget(
+        buildTestableWidget(
+          FileIndexerScreen(
+            indexService: service,
+            rulesService: AllowedTypesRulesService(
+              filePath: p.join(Directory.systemTemp.path, 'ft_no_rules.json'),
+            ),
+            initialFolderPath: r'C:\Docs\AS BUILT',
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Index Folder'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byType(Switch).last);
+      await tester.pumpAndSettle();
+
+      // Turn the flatten switch off (the copy switch stays on).
+      final flattenSwitch = find.byKey(
+        const Key('flatten-single-file-folders-switch'),
+      );
+      expect(tester.widget<Switch>(flattenSwitch).value, isTrue);
+      await tester.tap(flattenSwitch);
+      await tester.pumpAndSettle();
+
+      final destinationField = find.byWidgetPredicate(
+        (widget) =>
+            widget is TextField &&
+            widget.decoration?.labelText == 'Duplicate Codes Destination',
+      );
+      await tester.enterText(destinationField, r'D:\Duplicate Codes');
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Copy Duplicates (1)'));
+      await tester.pumpAndSettle();
+
+      expect(service.flattenedDestination, isNull);
+      expect(find.textContaining('Flatten:'), findsNothing);
     });
 
     testWidgets('edits shared document type file rules', (tester) async {

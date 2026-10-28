@@ -211,6 +211,37 @@ class TrashResult {
   bool get hasWarnings => warnings.isNotEmpty;
 }
 
+/// Outcome of flattening single-file folders in a copy destination.
+class FlattenResult {
+  /// Destination root whose subfolders were flattened.
+  final String destinationRoot;
+
+  /// Old destination path -> new path directly in [destinationRoot].
+  final Map<String, String> movedTo;
+
+  /// Folders that were deleted because their only file was moved out.
+  final List<String> removedFolders;
+
+  /// Files or folders that could not be flattened.
+  final List<String> warnings;
+
+  const FlattenResult({
+    required this.destinationRoot,
+    this.movedTo = const {},
+    this.removedFolders = const [],
+    this.warnings = const [],
+  });
+
+  /// Number of files moved into the destination root.
+  int get totalMoved => movedTo.length;
+
+  /// Number of folders that were removed.
+  int get totalRemoved => removedFolders.length;
+
+  /// Whether any folder could not be flattened.
+  bool get hasWarnings => warnings.isNotEmpty;
+}
+
 /// Recursively indexes every file below a folder and exports the result as CSV.
 ///
 /// The service is deliberately free of Flutter imports so it can also be driven
@@ -244,6 +275,9 @@ class FileIndexService {
     'System Volume Information',
     r'$RECYCLE.BIN',
   };
+
+  /// Folder inside a copy destination that receives disallowed files.
+  static const String _trashFolderName = 'trash';
 
   /// OS-generated noise that is not part of the document archive.
   static const Set<String> _ignoredFileNames = {
@@ -949,7 +983,7 @@ class FileIndexService {
     required String destinationRoot,
   }) async {
     final destination = p.normalize(p.absolute(destinationRoot));
-    final trashRoot = p.join(destination, 'trash');
+    final trashRoot = p.join(destination, _trashFolderName);
     final filesBySource = {for (final file in files) file.fullPath: file};
 
     final movedTo = <String, String>{};
@@ -1038,6 +1072,139 @@ class FileIndexService {
       destinationRoot: destination,
       trashRoot: trashRoot,
       movedTo: movedTo,
+      warnings: warnings,
+    );
+  }
+
+  /// Moves files out of folders that ended up holding a single file.
+  ///
+  /// Only the direct children of [destinationRoot] are inspected. When such a
+  /// folder contains exactly one file, the file is moved into
+  /// [destinationRoot] and the now-empty folder is deleted. Folders holding
+  /// several files, no files, or a single subfolder are left untouched.
+  ///
+  /// The `trash` folder is never touched, so trashed files stay trashed, and
+  /// dot-prefixed folders are skipped. Name clashes are resolved with
+  /// ` (2)`, ` (3)`, ... exactly like the copy step, so no file is ever
+  /// overwritten. Re-running the step is idempotent.
+  Future<FlattenResult> flattenSingleFileFolders({
+    required String destinationRoot,
+  }) async {
+    final trimmedRoot = destinationRoot.trim();
+    if (trimmedRoot.isEmpty) {
+      throw ArgumentError.value(
+        destinationRoot,
+        'destinationRoot',
+        'must not be empty',
+      );
+    }
+
+    final destination = p.normalize(p.absolute(trimmedRoot));
+    final movedTo = <String, String>{};
+    final removedFolders = <String>[];
+    final warnings = <String>[];
+
+    final rootType = await FileSystemEntity.type(
+      destination,
+      followLinks: false,
+    );
+    if (rootType != FileSystemEntityType.directory) {
+      _log.i(
+        'Flatten skipped: destination "$destination" does not exist or is '
+        'not a folder.',
+      );
+      return FlattenResult(destinationRoot: destination);
+    }
+
+    _log.i('Flattening single-file folders in "$destination".');
+
+    final List<FileSystemEntity> entries;
+    try {
+      entries = await Directory(destination).list(followLinks: false).toList();
+    } on FileSystemException catch (error) {
+      _log.w('Could not list destination "$destination".', error: error);
+      return FlattenResult(
+        destinationRoot: destination,
+        warnings: ['Could not list "$destination": ${error.message}'],
+      );
+    }
+
+    final folders = entries.whereType<Directory>().toList()
+      ..sort(
+        (a, b) => p
+            .basename(a.path)
+            .toLowerCase()
+            .compareTo(p.basename(b.path).toLowerCase()),
+      );
+
+    final reservedNames = <String>{};
+
+    for (final folder in folders) {
+      final folderName = p.basename(folder.path);
+      if (folderName.toLowerCase() == _trashFolderName) {
+        _log.t('Flatten skipped trash folder: "${folder.path}".');
+        continue;
+      }
+      if (folderName.startsWith('.')) continue;
+
+      final List<FileSystemEntity> contents;
+      try {
+        contents = await folder.list(followLinks: false).toList();
+      } on FileSystemException catch (error) {
+        _log.w('Could not inspect folder: "${folder.path}".', error: error);
+        warnings.add('Could not inspect "${folder.path}": ${error.message}');
+        continue;
+      }
+
+      if (contents.length != 1) continue;
+
+      final only = contents.single;
+      if (only is! File) continue;
+
+      final target = await _resolveFlattenTarget(
+        destination,
+        p.basename(only.path),
+        reservedNames,
+      );
+
+      try {
+        await only.rename(target);
+      } on FileSystemException catch (error) {
+        _log.w('Could not move file out of "${folder.path}".', error: error);
+        warnings.add(
+          'Could not move "${only.path}" to "$target": ${error.message}',
+        );
+        continue;
+      }
+
+      movedTo[p.normalize(only.path)] = p.normalize(target);
+      _log.t('Flattened "${only.path}" -> "$target".');
+
+      try {
+        await folder.delete();
+        removedFolders.add(p.normalize(folder.path));
+        _log.t('Removed emptied folder "${folder.path}".');
+      } on FileSystemException catch (error) {
+        _log.w(
+          'Could not remove emptied folder: "${folder.path}".',
+          error: error,
+        );
+        warnings.add(
+          'Could not remove emptied folder "${folder.path}": ${error.message}',
+        );
+      }
+    }
+
+    _log.i(
+      'Flatten finished: ${movedTo.length} file(s) moved, '
+      '${removedFolders.length} folder(s) removed, '
+      '${warnings.length} warning(s).',
+    );
+
+    return FlattenResult(
+      destinationRoot: destination,
+      movedTo: movedTo,
+      removedFolders: removedFolders,
       warnings: warnings,
     );
   }
@@ -1200,6 +1367,39 @@ class FileIndexService {
           !overwrite &&
           await candidateFile.length() == file.sizeInBytes) {
         return (target: candidate, copy: false);
+      }
+
+      counter++;
+    }
+  }
+
+  /// Chooses a free file name for a flattened file inside [directory].
+  ///
+  /// Returns `directory/<fileName>` when that name is free and otherwise
+  /// appends ` (2)`, ` (3)`, ... before the extension, mirroring the naming
+  /// used when two copied files clash. [reservedNames] prevents two flattened
+  /// files from claiming the same name during one run.
+  static Future<String> _resolveFlattenTarget(
+    String directory,
+    String fileName,
+    Set<String> reservedNames,
+  ) async {
+    final extension = p.extension(fileName);
+    final baseName = p.basenameWithoutExtension(fileName);
+    var counter = 1;
+
+    while (true) {
+      final candidateName = counter == 1
+          ? fileName
+          : '$baseName ($counter)$extension';
+      final candidate = p.join(directory, candidateName);
+      final lowerName = candidateName.toLowerCase();
+
+      if (!reservedNames.contains(lowerName) &&
+          await FileSystemEntity.type(candidate, followLinks: false) ==
+              FileSystemEntityType.notFound) {
+        reservedNames.add(lowerName);
+        return candidate;
       }
 
       counter++;

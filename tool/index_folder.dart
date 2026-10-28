@@ -33,6 +33,11 @@ const String _usage =
     '                             omitted, the shared rules file edited in the\n'
     '                             app (%%APPDATA%%/FtFileSorter/allowed_types.json)\n'
     '                             is loaded automatically.\n'
+    '  --flatten-single-file-folders\n'
+    '                             After copying and cleanup, move the only file\n'
+    '                             of a destination subfolder into the\n'
+    '                             destination root and delete the empty folder.\n'
+    '                             The trash folder is never flattened.\n'
     '  --reindex                  Index again even when a CSV already exists.\n'
     '  --reuse-index              Reuse an existing CSV without asking.\n'
     '  --recopy                   Copy again even when <dest> already has a copy.\n'
@@ -46,7 +51,7 @@ enum _CopyMode { byCode, duplicates }
 
 /// Indexes a folder, writes a CSV, and optionally copies files by document code.
 ///
-/// The tool runs in three phases:
+/// The tool runs in four phases:
 ///
 /// 1. **Index** — scans `<folder>` and writes the CSV (default
 ///    `<folder>/file_index.csv`). When a reusable CSV already exists the user is
@@ -60,6 +65,10 @@ enum _CopyMode { byCode, duplicates }
 /// 3. **Cleanup** — when `--allowed-types` is given, copied files whose
 ///    extension is not allowed for their document type are moved into
 ///    `<destination>/trash/`, and the CSV is updated with their final paths.
+/// 4. **Flatten** — when `--flatten-single-file-folders` is given, destination
+///    subfolders that hold exactly one file are collapsed: the file is moved
+///    into the destination root, the empty folder is deleted, and the CSV is
+///    updated with its new path. The `trash` folder is left untouched.
 ///
 /// See `tool/README.md` for the full flag reference and the destination layout.
 Future<void> main(List<String> arguments) async {
@@ -314,6 +323,40 @@ Future<void> main(List<String> arguments) async {
       }
     }
 
+    if (options.flattenSingleFileFolders) {
+      final flattenResult = await service.flattenSingleFileFolders(
+        destinationRoot: destination,
+      );
+
+      if (flattenResult.movedTo.isNotEmpty) {
+        final movedPaths = {
+          for (final entry in flattenResult.movedTo.entries)
+            p.normalize(entry.key): entry.value,
+        };
+        copiedTo.updateAll(
+          (source, path) => movedPaths[p.normalize(path)] ?? path,
+        );
+        await service.writeCsv(options.csvPath, files, copiedTo: copiedTo);
+      }
+
+      stdout.writeln(
+        'Flatten: ${flattenResult.totalMoved} file(s) moved to the '
+        'destination root, ${flattenResult.totalRemoved} folder(s) removed.',
+      );
+
+      if (flattenResult.movedTo.isNotEmpty) {
+        stdout.writeln(
+          'CSV updated with flattened destinations for '
+          '${flattenResult.totalMoved} file(s).',
+        );
+      }
+
+      for (final warning in flattenResult.warnings) {
+        log.w(warning);
+        stderr.writeln('Warning: $warning');
+      }
+    }
+
     if (copyResult.copiedToBySource.isNotEmpty) {
       await _CopyState(
         mode: options.copyMode!.name,
@@ -369,6 +412,7 @@ class _Options {
   final bool overwrite;
   final Map<String, Set<String>> allowedExtensions;
   final String? allowedTypesFile;
+  final bool flattenSingleFileFolders;
   final bool reindex;
   final bool reuseIndex;
   final bool recopy;
@@ -383,6 +427,7 @@ class _Options {
     required this.overwrite,
     required this.allowedExtensions,
     required this.allowedTypesFile,
+    required this.flattenSingleFileFolders,
     required this.reindex,
     required this.reuseIndex,
     required this.recopy,
@@ -399,6 +444,7 @@ class _Options {
     String? allowedTypesFile;
     var recursive = true;
     var overwrite = false;
+    var flattenSingleFileFolders = false;
     var reindex = false;
     var reuseIndex = false;
     var recopy = false;
@@ -437,6 +483,10 @@ class _Options {
       }
       if (argument == '--overwrite-duplicates') {
         overwrite = true;
+        continue;
+      }
+      if (argument == '--flatten-single-file-folders') {
+        flattenSingleFileFolders = true;
         continue;
       }
       if (argument == '--reindex') {
@@ -564,6 +614,13 @@ class _Options {
       _usageError('The --allowed-types-file path must not be empty.');
       return null;
     }
+    if (flattenSingleFileFolders && copyMode == null) {
+      _usageError(
+        '--flatten-single-file-folders requires --copy-by-code or '
+        '--copy-duplicates.',
+      );
+      return null;
+    }
     if (csvPath != null && csvPath.isEmpty) {
       _usageError('The --csv path must not be empty.');
       return null;
@@ -591,6 +648,7 @@ class _Options {
       overwrite: overwrite,
       allowedExtensions: allowedExtensions,
       allowedTypesFile: allowedTypesFile,
+      flattenSingleFileFolders: flattenSingleFileFolders,
       reindex: reindex,
       reuseIndex: reuseIndex,
       recopy: recopy,

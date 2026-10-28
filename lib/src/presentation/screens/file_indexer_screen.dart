@@ -55,6 +55,7 @@ class _FileIndexerScreenState extends State<FileIndexerScreen> {
 
   bool _recursive = true;
   bool _copyDuplicates = false;
+  bool _flattenSingleFileFolders = true;
   bool _isScanning = false;
   bool _isExporting = false;
   bool _isCopying = false;
@@ -64,6 +65,7 @@ class _FileIndexerScreenState extends State<FileIndexerScreen> {
   FileIndexResult? _result;
   DuplicateCopyResult? _copyResult;
   TrashResult? _trashResult;
+  FlattenResult? _flattenResult;
 
   /// Source path -> copy destination, exported in the CSV `Copied To` column.
   Map<String, String> _copiedTo = const {};
@@ -209,6 +211,7 @@ class _FileIndexerScreenState extends State<FileIndexerScreen> {
         _errorMessage = null;
         _copyResult = null;
         _trashResult = null;
+        _flattenResult = null;
         _copiedTo = const {};
         _typeFilter = _allTypesFilter;
         _page = 0;
@@ -380,6 +383,7 @@ class _FileIndexerScreenState extends State<FileIndexerScreen> {
       _isCopying = true;
       _copyResult = null;
       _trashResult = null;
+      _flattenResult = null;
     });
 
     try {
@@ -401,6 +405,25 @@ class _FileIndexerScreenState extends State<FileIndexerScreen> {
         copiedTo = {...copiedTo, ...trashResult.movedTo};
       }
 
+      // Collapse destination folders that ended up with a single file, as the
+      // CLI does when --flatten-single-file-folders is passed. The trash folder
+      // is never flattened, so trashed files stay in place.
+      final flattenResult = _flattenSingleFileFolders
+          ? await widget.indexService.flattenSingleFileFolders(
+              destinationRoot: destination,
+            )
+          : null;
+      if (flattenResult != null && flattenResult.movedTo.isNotEmpty) {
+        final movedPaths = {
+          for (final entry in flattenResult.movedTo.entries)
+            p.normalize(entry.key): entry.value,
+        };
+        copiedTo = {
+          for (final entry in copiedTo.entries)
+            entry.key: movedPaths[p.normalize(entry.value)] ?? entry.value,
+        };
+      }
+
       stopwatch.stop();
 
       if (!mounted) {
@@ -411,6 +434,7 @@ class _FileIndexerScreenState extends State<FileIndexerScreen> {
       _log.i(
         'Duplicate copy applied: ${copyResult.totalCopied} copied, '
         '${copyResult.totalSkipped} skipped, '
+        '${flattenResult?.totalMoved ?? 0} flattened, '
         '${copyResult.warnings.length} warning(s) in '
         '${stopwatch.elapsedMilliseconds} ms.',
       );
@@ -419,16 +443,19 @@ class _FileIndexerScreenState extends State<FileIndexerScreen> {
         _copyResult = copyResult;
         _copiedTo = copiedTo;
         _trashResult = trashResult;
+        _flattenResult = flattenResult;
       });
 
       final trashMoved = trashResult?.totalMoved ?? 0;
+      final flattenedCount = flattenResult?.totalMoved ?? 0;
       _showSnackBar(
         copyResult.hasWarnings && copyResult.totalCopied == 0
             ? 'Duplicate copy failed: ${copyResult.warnings.length} item(s) '
                   'could not be copied.'
             : 'Copied ${copyResult.totalCopied} file(s) into '
                   '${copyResult.totalGroups} document-code folder(s).'
-                  '${trashMoved > 0 ? ' Moved $trashMoved to trash.' : ''}',
+                  '${trashMoved > 0 ? ' Moved $trashMoved to trash.' : ''}'
+                  '${flattenedCount > 0 ? ' Flattened $flattenedCount folder(s).' : ''}',
         isError: copyResult.hasWarnings && copyResult.totalCopied == 0,
       );
     } catch (error, stackTrace) {
@@ -563,31 +590,56 @@ class _FileIndexerScreenState extends State<FileIndexerScreen> {
           constraints: const BoxConstraints(maxWidth: 1500),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _buildFolderCard(colorScheme),
-                if (_errorMessage != null) ...[
-                  const SizedBox(height: 16),
-                  _buildErrorCard(colorScheme),
-                ],
-                if (_result != null &&
-                    !_isScanning &&
-                    _result!.warnings.isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  _buildWarningsCard(colorScheme),
-                ],
-                if (_copyResult != null) ...[
-                  const SizedBox(height: 16),
-                  _buildCopySummaryCard(colorScheme),
-                ],
-                if (_trashResult != null) ...[
-                  const SizedBox(height: 16),
-                  _buildTrashSummaryCard(colorScheme),
-                ],
-                const SizedBox(height: 16),
-                Expanded(child: _buildBody(colorScheme)),
-              ],
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                // The summary cards above the table can grow without bound (one
+                // per phase, with warnings). Cap them and let them scroll so the
+                // results table always keeps a usable amount of space on short
+                // windows instead of overflowing.
+                final headerMaxHeight = constraints.maxHeight * 0.6;
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    ConstrainedBox(
+                      constraints: BoxConstraints(maxHeight: headerMaxHeight),
+                      child: SingleChildScrollView(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            _buildFolderCard(colorScheme),
+                            if (_errorMessage != null) ...[
+                              const SizedBox(height: 16),
+                              _buildErrorCard(colorScheme),
+                            ],
+                            if (_result != null &&
+                                !_isScanning &&
+                                _result!.warnings.isNotEmpty) ...[
+                              const SizedBox(height: 16),
+                              _buildWarningsCard(colorScheme),
+                            ],
+                            if (_copyResult != null) ...[
+                              const SizedBox(height: 16),
+                              _buildCopySummaryCard(colorScheme),
+                            ],
+                            if (_trashResult != null) ...[
+                              const SizedBox(height: 16),
+                              _buildTrashSummaryCard(colorScheme),
+                            ],
+                            if (_flattenResult != null &&
+                                (_flattenResult!.totalMoved > 0 ||
+                                    _flattenResult!.hasWarnings)) ...[
+                              const SizedBox(height: 16),
+                              _buildFlattenSummaryCard(colorScheme),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Expanded(child: _buildBody(colorScheme)),
+                  ],
+                );
+              },
             ),
           ),
         ),
@@ -730,6 +782,40 @@ class _FileIndexerScreenState extends State<FileIndexerScreen> {
                           Text(
                             'Include subfolders',
                             style: theme.textTheme.bodyMedium,
+                          ),
+                        ],
+                      ),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Switch(
+                            key: const Key(
+                              'flatten-single-file-folders-switch',
+                            ),
+                            value: _flattenSingleFileFolders,
+                            onChanged: _isScanning || _isCopying
+                                ? null
+                                : (value) {
+                                    _log.d(
+                                      'Flatten single-file folders changed '
+                                      'to $value.',
+                                    );
+                                    setState(
+                                      () => _flattenSingleFileFolders = value,
+                                    );
+                                  },
+                          ),
+                          const SizedBox(width: 4),
+                          Tooltip(
+                            message:
+                                'After copying and trash cleanup, a code '
+                                'folder left with a single file is moved into '
+                                'the destination root and the empty folder is '
+                                'deleted. The trash folder is never flattened.',
+                            child: Text(
+                              'Flatten single-file folders',
+                              style: theme.textTheme.bodyMedium,
+                            ),
                           ),
                         ],
                       ),
@@ -1025,6 +1111,59 @@ class _FileIndexerScreenState extends State<FileIndexerScreen> {
                         : colorScheme.onErrorContainer,
                   ),
                 ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFlattenSummaryCard(ColorScheme colorScheme) {
+    final flatten = _flattenResult!;
+    final hasWarnings = flatten.hasWarnings;
+    final color = hasWarnings
+        ? colorScheme.tertiaryContainer
+        : colorScheme.secondaryContainer;
+    final onColor = hasWarnings
+        ? colorScheme.onTertiaryContainer
+        : colorScheme.onSecondaryContainer;
+
+    return Card(
+      elevation: 0,
+      color: color,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: ExpansionTile(
+        initiallyExpanded: hasWarnings,
+        leading: Icon(
+          hasWarnings ? Icons.warning_amber_outlined : Icons.call_merge,
+          color: onColor,
+        ),
+        title: Text(
+          'Flatten: ${flatten.totalMoved} file(s) moved into the '
+          'destination root',
+          style: TextStyle(color: onColor, fontWeight: FontWeight.w600),
+        ),
+        subtitle: Text(
+          flatten.destinationRoot,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(color: onColor),
+        ),
+        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+        children: [
+          if (flatten.totalRemoved > 0)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                '${flatten.totalRemoved} empty code folder(s) removed.',
+                style: TextStyle(color: onColor),
+              ),
+            ),
+          for (final warning in flatten.warnings.take(10))
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(warning, style: TextStyle(color: onColor)),
               ),
             ),
         ],

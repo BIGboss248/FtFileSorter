@@ -52,7 +52,7 @@ drift to different configuration files.
 
 ## index_folder.dart
 
-The tool runs in three phases:
+The tool runs in four phases:
 
 1. **Index** — scans `<folder>`, extracts the document code and document type
    from every file name, and writes a CSV.
@@ -63,6 +63,10 @@ The tool runs in three phases:
    file has rules), copied files whose extension is not allowed for their
    document type are moved into `<destination>/trash/`, and the CSV is updated
    with their final paths.
+4. **Flatten** (optional) — when `--flatten-single-file-folders` is given,
+   destination subfolders that hold exactly one file are collapsed: the file is
+   moved into the destination root, the empty folder is deleted, and the CSV is
+   updated with the new paths.
 
 The final CSV is also copied into the copy destination itself, so each sorted
 folder carries its own index snapshot.
@@ -85,6 +89,7 @@ folder carries its own index snapshot.
 | `--overwrite-duplicates` | Replace files that already exist in the destination. Applies to both copy modes. |
 | `--allowed-types=<rules>` | Clean the copy: keep only the listed extensions per document type and move the rest into `<destination>/trash/`. See [Trash cleanup](#trash-cleanup---allowed-types). Repeatable. |
 | `--allowed-types-file=<file>` | Load the cleanup rules from a JSON file. When neither this nor `--allowed-types` is given, the shared rules file edited in the app (`%APPDATA%\FtFileSorter\allowed_types.json`) is loaded automatically. |
+| `--flatten-single-file-folders` | After copying and cleanup, move the only file of each destination subfolder into the destination root and delete the empty folder. Requires a copy mode. The `trash` folder is never flattened. |
 | `--reindex` | Index again even when a CSV already exists. |
 | `--reuse-index` | Reuse an existing CSV without asking. |
 | `--recopy` | Copy again even when the destination already has a copy. |
@@ -100,7 +105,8 @@ dart run tool/index_folder.dart "D:\Documents\AS BUILT" --csv "D:\exports\index.
 ```
 
 `--copy-by-code` and `--copy-duplicates` cannot be combined, and neither can
-`--reindex` with `--reuse-index`.
+`--reindex` with `--reuse-index`. `--flatten-single-file-folders` requires
+`--copy-by-code` or `--copy-duplicates`.
 
 ### Choosing where the CSV is saved
 
@@ -143,10 +149,10 @@ Index,File Name,...,Full Path,Size (Bytes),Modified,Copied To
 - Re-indexing preserves destinations from the previous CSV for files that still
   exist. A completely new CSV starts with an empty column.
 
-Because the copy step runs after indexing, the CSV is written two or three
-times in a copy run: once right after the index (so the index exists even if
-copying fails), again with the copy destinations, and once more when the cleanup
-step moves files to the trash.
+Because the copy step runs after indexing, the CSV is written up to four times
+in a copy run: once right after the index (so the index exists even if copying
+fails), again with the copy destinations, once more when the cleanup step moves
+files to the trash, and again when flattened files change location.
 
 When a copy destination is used, the final CSV is also written to
 `<destination>/<csv file name>` (for example `D:\Sorted\index.csv`), including
@@ -267,6 +273,37 @@ D:\Sorted/
       └─ DNSSGM12000JCSS70001-0001.dwg     <- DWG is not allowed for JC
 ```
 
+### Flatten single-file folders (`--flatten-single-file-folders`)
+
+After copying (and trash cleanup), a code folder can end up holding a single
+file — for example when every other revision of the same code was moved to the
+trash. Pass `--flatten-single-file-folders` to collapse those folders:
+
+```bat
+dart run tool/index_folder.dart "D:\Documents\AS BUILT" --copy-by-code "D:\Sorted AS BUILT" --flatten-single-file-folders
+```
+
+Rules:
+
+- Only the **direct children** of the destination are inspected; nested folders
+  are left alone.
+- A folder is flattened only when it contains **exactly one file**. Folders with
+  several files, no files, or a single subfolder are left untouched, and empty
+  folders that the step did not empty are kept.
+- The file is moved into the destination root and the emptied folder is
+  deleted.
+- The `trash` folder and dot-prefixed folders are never touched, so trashed
+  files stay trashed.
+- If a file with the same name already exists in the root, the moved file gets
+  ` (2)`, ` (3)`, ... before its extension, exactly like the copy step. Nothing
+  is overwritten.
+- The `Copied To` column is updated to the new root paths. Re-running the step
+  is idempotent.
+
+Example: `D:\Sorted\DNSSGM12000JCSS700\only-left.pdf` becomes
+`D:\Sorted\only-left.pdf`, and the now-empty
+`D:\Sorted\DNSSGM12000JCSS700` folder is removed.
+
 ### Rules file and the app editor
 
 The associations can also be maintained in the **File Indexer** screen:
@@ -375,6 +412,9 @@ dart run tool/index_folder.dart "D:\Documents\AS BUILT" --csv "D:\exports\index.
 :: Sort, then trash extensions that are not wanted per document type
 dart run tool/index_folder.dart "D:\Documents\AS BUILT" --csv "D:\exports\index.csv" --copy-by-code "D:\Sorted AS BUILT" --allowed-types "JC=dwg,pdf;JA=pdf"
 
+:: Sort, clean up, then move single-file code folders into the destination root
+dart run tool/index_folder.dart "D:\Documents\AS BUILT" --copy-by-code "D:\Sorted AS BUILT" --flatten-single-file-folders
+
 :: Same cleanup, but use the rules saved by the File Indexer screen
 :: (%APPDATA%\FtFileSorter\allowed_types.json is loaded automatically)
 dart run tool/index_folder.dart "D:\Documents\AS BUILT" --csv "D:\exports\index.csv" --copy-by-code "D:\Sorted AS BUILT"
@@ -410,5 +450,7 @@ dart run tool/index_folder.dart "D:\Documents\AS BUILT" --copy-duplicates "D:\Du
   After copying it moves disallowed file types into `<destination>/trash/` using
   the shared rules edited in the File Type Rules dialog, and its CSV export
   includes the `Copied To` column reflecting those final paths. The
-  sort-everything copy mode is CLI-only.
+  **Flatten single-file folders** switch (on by default) applies the flatten
+  step described above after the copy and cleanup. The sort-everything copy mode
+  is CLI-only.
 - Debug logging is printed to the console for every indexed and copied file.

@@ -786,6 +786,126 @@ void main() {
     });
   });
 
+  group('Flatten single-file folders', () {
+    const service = FileIndexService();
+
+    late Directory tempDir;
+
+    setUp(() async {
+      tempDir = await Directory.systemTemp.createTemp('ft_flatten_');
+    });
+
+    tearDown(() async {
+      if (await tempDir.exists()) {
+        await tempDir.delete(recursive: true);
+      }
+    });
+
+    Future<void> writeFile(String relativePath, [String content = 'x']) async {
+      final file = File(p.join(tempDir.path, relativePath));
+      await file.parent.create(recursive: true);
+      await file.writeAsString(content);
+    }
+
+    test('moves the only file of a code folder into the root', () async {
+      await writeFile(p.join('DNSSGM12000JCSS700', 'one.pdf'), 'code');
+      await writeFile('loose.pdf', 'loose');
+
+      final result = await service.flattenSingleFileFolders(
+        destinationRoot: tempDir.path,
+      );
+
+      expect(result.totalMoved, equals(1));
+      expect(result.totalRemoved, equals(1));
+      expect(result.warnings, isEmpty);
+      expect(File(p.join(tempDir.path, 'one.pdf')).existsSync(), isTrue);
+      expect(
+        Directory(p.join(tempDir.path, 'DNSSGM12000JCSS700')).existsSync(),
+        isFalse,
+      );
+      expect(File(p.join(tempDir.path, 'loose.pdf')).existsSync(), isTrue);
+    });
+
+    test('leaves folders with several files or a single subfolder', () async {
+      await writeFile(p.join('TWO', 'a.pdf'));
+      await writeFile(p.join('TWO', 'b.pdf'));
+      await writeFile(p.join('NESTED', 'INNER', 'only.pdf'));
+
+      final result = await service.flattenSingleFileFolders(
+        destinationRoot: tempDir.path,
+      );
+
+      expect(result.totalMoved, isZero);
+      expect(result.totalRemoved, isZero);
+      expect(Directory(p.join(tempDir.path, 'TWO')).existsSync(), isTrue);
+      expect(
+        File(p.join(tempDir.path, 'NESTED', 'INNER', 'only.pdf')).existsSync(),
+        isTrue,
+      );
+    });
+
+    test('never flattens the trash folder', () async {
+      await writeFile(p.join('trash', 'CODE', 'only.dwg'));
+
+      final result = await service.flattenSingleFileFolders(
+        destinationRoot: tempDir.path,
+      );
+
+      expect(result.totalMoved, isZero);
+      expect(result.totalRemoved, isZero);
+      expect(
+        File(p.join(tempDir.path, 'trash', 'CODE', 'only.dwg')).existsSync(),
+        isTrue,
+      );
+    });
+
+    test('suffixes a clashing name instead of overwriting', () async {
+      await writeFile('one.pdf', 'root');
+      await writeFile(p.join('CODE', 'one.pdf'), 'code');
+
+      final result = await service.flattenSingleFileFolders(
+        destinationRoot: tempDir.path,
+      );
+
+      expect(result.totalMoved, equals(1));
+      expect(
+        File(p.join(tempDir.path, 'one.pdf')).readAsStringSync(),
+        equals('root'),
+      );
+      expect(
+        File(p.join(tempDir.path, 'one (2).pdf')).readAsStringSync(),
+        equals('code'),
+      );
+    });
+
+    test('keeps folders that were already empty', () async {
+      await Directory(p.join(tempDir.path, 'EMPTY')).create(recursive: true);
+
+      final result = await service.flattenSingleFileFolders(
+        destinationRoot: tempDir.path,
+      );
+
+      expect(result.totalRemoved, isZero);
+      expect(Directory(p.join(tempDir.path, 'EMPTY')).existsSync(), isTrue);
+    });
+
+    test('returns an empty result when the destination is missing', () async {
+      final result = await service.flattenSingleFileFolders(
+        destinationRoot: p.join(tempDir.path, 'missing'),
+      );
+
+      expect(result.totalMoved, isZero);
+      expect(result.warnings, isEmpty);
+    });
+
+    test('rejects an empty destination', () {
+      expect(
+        service.flattenSingleFileFolders(destinationRoot: '   '),
+        throwsArgumentError,
+      );
+    });
+  });
+
   group('CSV export', () {
     const service = FileIndexService();
 
