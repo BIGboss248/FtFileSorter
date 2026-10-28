@@ -13,6 +13,43 @@ Run the tools from the repository root:
 dart run tool/index_folder.dart <folder> [output.csv] [options]
 ```
 
+## Bundled Windows build
+
+The Windows app can ship the CLI next to the GUI so both use the same shared
+configuration and the user needs no Dart SDK. Build both with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tool\build_windows.ps1
+```
+
+This runs `flutter build windows --release`, then compiles this tool into
+`build\windows\x64\runner\Release\index_folder.exe` with `dart compile exe`. The
+Release folder then contains:
+
+```text
+build\windows\x64\runner\Release\
+├─ ft_file_sorter.exe   <- GUI
+├─ index_folder.exe     <- CLI (self-contained, no Dart SDK required)
+├─ flutter_windows.dll
+└─ data\
+```
+
+Pass `-Installer` to also build the Inno Setup installer, which installs both
+executables side by side:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tool\build_windows.ps1 -Installer -Version 1.2.3
+```
+
+The installer offers an optional task that adds the install folder to the user
+`PATH`, so `index_folder` can be run from any terminal.
+
+Both executables resolve the shared rules through
+`%APPDATA%\FtFileSorter\allowed_types.json`, so the document-type rules edited in
+the GUI's **File Type Rules** dialog are exactly the ones the CLI applies. The
+rule path is independent of the working directory, so the GUI and CLI cannot
+drift to different configuration files.
+
 ## index_folder.dart
 
 The tool runs in three phases:
