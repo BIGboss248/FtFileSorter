@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.8](https://github.com/BIGboss248/FtFileSorter/compare/ft_file_sorter-v0.1.7...ft_file_sorter-v0.1.8) (2026-10-28)
+
+
+### Features
+
+* trigger release build after pinning dependency lockfile ([f51ad61](https://github.com/BIGboss248/FtFileSorter/commit/f51ad61cc22177a335eba6b6ea811e29dcfd7795))
+
 ## [0.1.7](https://github.com/BIGboss248/FtFileSorter/compare/ft_file_sorter-v0.1.6...ft_file_sorter-v0.1.7) (2026-10-28)
 
 
