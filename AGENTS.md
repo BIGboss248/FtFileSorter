@@ -24,14 +24,16 @@ planning a feature or a fix. The non-negotiables:
 
 Before reporting a change as complete, run the read-only `reviewer` subagent on
 the diff (`/review`, or "use the reviewer subagent on the current diff"). Review
-base branch: `main`.
+base branch: `main`, compared as `origin/main` when the working branch is
+`main`.
 
 - The reviewer never edits files, runs tests, or writes the report; it returns
   the report in chat.
 - Resolve every Blocker, Critical, and High finding before calling the change
-  complete. Medium and Low findings may ship only with the accepted risk and its
-  reason recorded in the saved report. Re-run the review after the fix.
+  complete. A Medium finding may ship only with its accepted risk recorded in §9
+  of the saved report; Low and Nit findings may ship as noted. Re-run the review
+  after the fix.
 - The reviewer cannot certify the test gate — run it yourself.
-- Persist the report to `docs/reviews/YYYY-MM-DD-<slug>.md` when the change is
+- Save the report to `docs/reviews/YYYY-MM-DD-<slug>.md` when the change is
   accepted; add `-2`, `-3` for further reviews on the same day. Format:
   `.agents/rules/code-review-report.md`.

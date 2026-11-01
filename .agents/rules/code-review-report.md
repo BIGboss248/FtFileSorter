@@ -2,7 +2,7 @@
 
 Canonical format for findings produced by the `reviewer` subagent (and by
 `/review`). One report per review. The reviewer emits it in chat; the primary
-agent may persist it to `docs/reviews/YYYY-MM-DD-<slug>.md`.
+agent saves it to `docs/reviews/YYYY-MM-DD-<slug>.md`.
 
 This file is not loaded as project instructions. It is read at review time only.
 
@@ -46,10 +46,13 @@ Nit.
 
 | Verdict | Use when |
 | :--- | :--- |
-| `APPROVE` | No Blocker/Critical/High/Medium findings. |
-| `APPROVE WITH COMMENTS` | Only Low/Nit findings, or Medium findings explicitly accepted by the author. |
-| `CHANGES REQUESTED` | Any Blocker, Critical, or High finding. |
+| `APPROVE` | No findings, or Nit findings only. |
+| `APPROVE WITH COMMENTS` | Only Low/Nit findings, or Medium findings the author explicitly accepted and recorded in §9. |
+| `CHANGES REQUESTED` | Any Blocker, Critical, or High finding, or any Medium the author has not accepted. |
 | `BLOCKED` | Cannot review faithfully: missing diff, missing files, or scope too large for the step budget. Name what is missing. |
+
+When more than one verdict matches, use the order
+`BLOCKED` > `CHANGES REQUESTED` > `APPROVE WITH COMMENTS` > `APPROVE`.
 
 ## Findings table
 
@@ -96,7 +99,7 @@ say why.
 
 ### 1. Scope
 
-- Base: `<ref>` → Head: `<ref>`
+- Base: `<ref>` → Head: `<ref>` (`<head-sha>`)
 - Commits: `<range>` · Files changed: `<n>` · Lines: `+<a> / -<d>`
 - Sources covered: branch commits (`git diff <base>...HEAD`), working tree
   (`git diff HEAD`), untracked files (`git ls-files --others --exclude-standard`)
@@ -145,10 +148,20 @@ makes an empty Findings table credible.
 
 ### 8. Open questions / missing context
 
-### 9. Follow-ups (non-blocking)
+### 9. Accepted risks
 
-### 10. Limitations
+Medium findings may ship only when the author accepts them. Low and Nit findings
+may ship as noted. Record one row per accepted Medium; without a row here, an
+unaccepted Medium keeps the verdict at `CHANGES REQUESTED`.
+
+| Finding | Accepted by | Reason | Mitigation / follow-up |
+| :--- | :--- | :--- | :--- |
+
+### 10. Follow-ups (non-blocking)
+
+### 11. Limitations
 
 What this review could not cover: tests not executed, runtime behavior not
-observed, external services mocked or absent.
+observed, external services mocked or absent. Note any change to the tree while
+the review was running.
 ```

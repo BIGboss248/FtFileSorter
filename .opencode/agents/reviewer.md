@@ -50,7 +50,10 @@ permissions:
     resource: "git rev-parse *"
     effect: allow
   - action: shell
-    resource: "git symbolic-ref *"
+    resource: "git symbolic-ref --short *"
+    effect: allow
+  - action: shell
+    resource: "git merge-base *"
     effect: allow
   - action: shell
     resource: "*--output*"
@@ -71,6 +74,9 @@ permissions:
     resource: "*&&*"
     effect: deny
   - action: shell
+    resource: "*&*"
+    effect: deny
+  - action: shell
     resource: "*|*"
     effect: deny
   - action: shell
@@ -78,6 +84,15 @@ permissions:
     effect: deny
   - action: shell
     resource: "*$(*"
+    effect: deny
+  - action: shell
+    resource: "*:.env*"
+    effect: deny
+  - action: shell
+    resource: "*/.env*"
+    effect: deny
+  - action: shell
+    resource: "* .env*"
     effect: deny
 ---
 
@@ -113,13 +128,22 @@ file.
 
 1. **Read the report standard** at `.agents/rules/code-review-report.md` and
    follow its structure, severity taxonomy, and verdict rules exactly.
-2. **Establish scope.** Resolve the review base branch: the branch named in
-   `AGENTS.md`, else `git symbolic-ref --short refs/remotes/origin/HEAD`, else
-   `main`. Then record all three sources of change:
-   - `git diff <base>...HEAD` — commits already on the branch;
+2. **Establish scope, and record the exact revision.** Resolve the review base
+   branch: the branch named in `AGENTS.md`, else
+   `git symbolic-ref --short refs/remotes/origin/HEAD`, else `main`. Prefer the
+   remote-tracking ref so work committed directly on the base branch is still
+   visible:
+   - `git diff origin/<base>...HEAD` when `origin/<base>` exists, otherwise
+     `git diff <base>...HEAD` — commits already on the branch;
    - `git diff HEAD` — staged and unstaged edits;
    - `git ls-files --others --exclude-standard` — new untracked files.
-   If all three are empty, say so and return `BLOCKED`.
+
+   Record `git rev-parse --short HEAD`, `git merge-base origin/<base> HEAD`, and
+   the literal range you used, so the effective base is auditable. If all three
+   sources are empty, report that there is nothing to review and return
+   `BLOCKED` with the reason `no changes`. If the tree changes while you review
+   (new commit, new staged file), say so in §11 and review the revision you
+   recorded.
 3. **Read the whole file, not just the hunks.** Changed lines are only
    reviewable in context: surrounding control flow, error handling, invariants,
    and cleanup. Open every untracked file in full.
